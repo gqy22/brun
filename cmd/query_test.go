@@ -32,16 +32,16 @@ func TestFormatRunList_Empty(t *testing.T) {
 
 func TestFormatShowOutput(t *testing.T) {
 	run := &RunDetail{
-		ID:        "20260513-153012-a8f3c2",
-		Name:      "test-run",
-		Project:   "rnaseq",
-		Status:    "success",
-		Command:   "python script.py --sample S1",
-		CWD:       "/home/user/project",
-		Duration:  "2m31s",
-		ExitCode:  0,
-		Tags:      []string{"rnaseq"},
-		Note:      "test note",
+		ID:       "20260513-153012-a8f3c2",
+		Name:     "test-run",
+		Project:  "rnaseq",
+		Status:   "success",
+		Command:  "python script.py --sample S1",
+		CWD:      "/home/user/project",
+		Duration: "2m31s",
+		ExitCode: 0,
+		Tags:     []string{"rnaseq"},
+		Note:     "test note",
 	}
 
 	output := FormatShow(run)
