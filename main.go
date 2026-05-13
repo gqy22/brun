@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.0"
 
 // 注入值: -X main.commit=xxx -X main.buildDate=xxx
 var commit string
@@ -625,7 +625,7 @@ func cleanCmd() *cobra.Command {
 			var items []cmd.CleanItem
 			for _, r := range runs {
 				items = append(items, cmd.CleanItem{
-					RunID: r.ID,
+					RunID:  r.ID,
 					Age:    ageSince(r.StartedAt),
 					Size:   "?",
 					Reason: "old",

@@ -9,9 +9,9 @@ import (
 )
 
 type Config struct {
-	Project string `yaml:"project"`
+	Project string        `yaml:"project"`
 	Capture CaptureConfig `yaml:"capture"`
-	Ignore  []string `yaml:"ignore"`
+	Ignore  []string      `yaml:"ignore"`
 }
 
 type CaptureConfig struct {
