@@ -14,6 +14,10 @@ import (
 
 var version = "0.1.0-dev"
 
+// 注入值: -X main.commit=xxx -X main.buildDate=xxx
+var commit string
+var buildDate string
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "brun",
