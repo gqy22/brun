@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/biotools/brun/cmd"
@@ -71,15 +74,21 @@ func runCmd() *cobra.Command {
 	var name, project, note string
 	var tags []string
 	var noFsDiff bool
+	var allowExit string
 	var timeout int
 	var cwdFlag string
+	var foreground bool
 
 	c := &cobra.Command{
 		Use:   "run -- <command...>",
-		Short: "执行命令并记录运行信息",
+		Short: "执行命令并记录运行信息 (默认后台运行)",
 		RunE: func(c *cobra.Command, args []string) error {
-			return executeRun(args, name, project, note, tags,
-				noFsDiff, time.Duration(timeout)*time.Second, cwdFlag)
+			if foreground {
+				return executeRun(args, name, project, note, tags,
+					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag)
+			}
+			return detachRun(c, args, name, project, note, tags,
+				noFsDiff, allowExit, timeout, cwdFlag)
 		},
 	}
 	c.Flags().StringVarP(&name, "name", "n", "", "run 名称")
@@ -87,16 +96,19 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&note, "note", "", "备注")
 	c.Flags().StringArrayVarP(&tags, "tag", "t", []string{}, "标签 (支持逗号分隔: -t align,hg38)")
 	c.Flags().BoolVar(&noFsDiff, "no-fs-diff", false, "禁用文件系统 diff")
+	c.Flags().StringVar(&allowExit, "allow-exit", "", "允许的非零退出码 (逗号分隔，如: 1,2,127)")
 	c.Flags().IntVar(&timeout, "timeout", 0, "超时(秒)")
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录")
+	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认后台)")
 	return c
 }
 
 func executeRun(args []string, name, project, note string, tags []string,
-	noFsDiff bool, timeout time.Duration, cwdFlag string) error {
+	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string) error {
 
 	// 支持逗号分隔: -t align,hg38 等价于 -t align -t hg38
 	tags = splitComma(tags)
+	allowedExits := parseAllowExit(allowExit)
 
 	if len(args) == 0 {
 		return fmt.Errorf("需要指定要执行的命令，使用: brun run -- <command>")
@@ -235,27 +247,99 @@ func executeRun(args []string, name, project, note string, tags []string,
 		store.AddNote(runID, note)
 	}
 
-	// 13. 更新 DB status
-	if err := store.UpdateRunStatus(runID, result.Status, result.ExitCode,
+	// 13. 确定最终状态 (allow-exit 覆盖)
+	status := result.Status
+	if status == "failed" && len(allowedExits) > 0 && allowedExits[result.ExitCode] {
+		status = "success"
+	}
+
+	// 14. 更新 DB status
+	if err := store.UpdateRunStatus(runID, status, result.ExitCode,
 		result.EndedAt, result.DurationMs); err != nil {
 		return fmt.Errorf("更新状态失败: %w", err)
 	}
 
-	// 14. 更新 runRecord 并写 metadata.yaml
-	runRecord.Status = result.Status
+	// 15. 写 metadata.yaml
+	runRecord.Status = status
 	runRecord.ExitCode = result.ExitCode
 	runRecord.EndedAt = result.EndedAt
 	runRecord.DurationMs = result.DurationMs
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
 	os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644)
 
-	// 15. 打印摘要
-	fmt.Printf("\nCommand finished %s in %s\n", result.Status, cmd.DurationString(result.DurationMs))
+	// 16. 打印摘要
+	fmt.Printf("\nCommand finished %s in %s\n", status, cmd.DurationString(result.DurationMs))
 	arts, _ := store.GetArtifacts(runID)
 	if len(arts) > 0 {
 		fmt.Printf("Outputs detected: %d\n", len(arts))
 	}
 
+	return nil
+}
+
+// detachRun 将当前命令以后台方式重新执行，父进程立即退出
+func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
+	noFsDiff bool, allowExit string, timeout int, cwdFlag string) error {
+
+	// 构建子进程参数: brun run --foreground [原有参数] -- <command>
+	childArgs := []string{"run", "--foreground"}
+
+	if name != "" {
+		childArgs = append(childArgs, "--name", name)
+	}
+	if project != "" {
+		childArgs = append(childArgs, "--project", project)
+	}
+	if note != "" {
+		childArgs = append(childArgs, "--note", note)
+	}
+	for _, t := range tags {
+		childArgs = append(childArgs, "--tag", t)
+	}
+	if noFsDiff {
+		childArgs = append(childArgs, "--no-fs-diff")
+	}
+	if allowExit != "" {
+		childArgs = append(childArgs, "--allow-exit", allowExit)
+	}
+	if timeout > 0 {
+		childArgs = append(childArgs, "--timeout", strconv.Itoa(timeout))
+	}
+	if cwdFlag != "" {
+		childArgs = append(childArgs, "--cwd", cwdFlag)
+	}
+	childArgs = append(childArgs, "--")
+	childArgs = append(childArgs, args...)
+
+	// 获取当前可执行文件路径
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("获取可执行路径失败: %w", err)
+	}
+
+	// 后台日志文件
+	os.MkdirAll(internal.HomeDir(), 0755)
+	detachLog := filepath.Join(internal.HomeDir(), "detach.log")
+	f, err := os.OpenFile(detachLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("创建后台日志失败: %w", err)
+	}
+
+	cmd := exec.Command(exePath, childArgs...)
+	cmd.Stdout = f
+	cmd.Stderr = f
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	if err := cmd.Start(); err != nil {
+		f.Close()
+		return fmt.Errorf("启动后台进程失败: %w", err)
+	}
+	f.Close()
+
+	fmt.Printf("[detach] PID=%d, 日志: %s\n", cmd.Process.Pid, detachLog)
+	fmt.Printf("[detach] 使用 'brun list' 查看运行状态\n")
 	return nil
 }
 
@@ -588,7 +672,7 @@ func rerunCmd() *cobra.Command {
 				_ = tags
 			}
 			return executeRun(origArgs, name, r.Project, "", nil,
-				false, 0, execCWD)
+				false, "", 0, execCWD)
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")
@@ -658,6 +742,24 @@ func splitComma(items []string) []string {
 		}
 	}
 	return out
+}
+
+func parseAllowExit(s string) map[int]bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	result := make(map[int]bool)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(part); err == nil {
+			result[n] = true
+		}
+	}
+	return result
 }
 
 // parseTimeFilter 将用户输入的时间过滤值转为 RFC3339

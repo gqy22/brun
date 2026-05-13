@@ -69,7 +69,7 @@ test_minimap2_pipeline() {
     mkdir -p "$out_dir"
 
     # 1a. minimap2 mapping
-    output=$("$BRUN" run --name "minimap2-align" -t "align,long-read" \
+    output=$("$BRUN" run -f --name "minimap2-align" -t "align,long-read" \
         -- minimap2 -t 2 -ax map-ont "$ref" "$fq1" 2>&1) || true
     if echo "$output" | grep -q "Run started"; then
         pass "minimap2 run 记录成功"
@@ -79,7 +79,7 @@ test_minimap2_pipeline() {
     fi
 
     # 1b. samtools sort + index
-    output=$("$BRUN" run --name "samtools-sort" --project "align" \
+    output=$("$BRUN" run -f --name "samtools-sort" --project "align" \
         --cwd "$out_dir" \
         -- samtools sort -@ 2 -o results/aln.sorted.bam results/aln.sam 2>&1) || true
     if echo "$output" | grep -q "Run started"; then
@@ -89,7 +89,7 @@ test_minimap2_pipeline() {
     fi
 
     # 1c. samtools flagstat
-    output=$("$BRUN" run --name "flagstat" --project "qc" \
+    output=$("$BRUN" run -f --name "flagstat" --project "qc" \
         --cwd "$out_dir" \
         -- samtools flagstat results/aln.sorted.bam 2>&1) || true
     if echo "$output" | grep -q "Run started"; then
@@ -99,7 +99,7 @@ test_minimap2_pipeline() {
     fi
 
     # 1d. samtools stats
-    output=$("$BRUN" run --name "bam-stats" --project "qc" \
+    output=$("$BRUN" run -f --name "bam-stats" --project "qc" \
         --cwd "$out_dir" \
         -- sh -c "samtools stats results/aln.sorted.bam > results/stats.txt" 2>&1) || true
     if echo "$output" | grep -q "Run started"; then
@@ -134,7 +134,7 @@ test_hisat2_alignment() {
 
     hisat2-build "$ref" "$idx_dir/genome" > /dev/null 2>&1 || true
 
-    output=$("$BRUN" run --name "hisat2-align" --project "rnaseq" \
+    output=$("$BRUN" run -f --name "hisat2-align" --project "rnaseq" \
         -t rna-seq -t short-read \
         --cwd "$out_dir" \
         -- hisat2 -p 2 -x "$idx_dir/genome" -1 "$fq1" -2 "$fq2" -S hisat2.sam 2>&1) || true
@@ -171,7 +171,7 @@ test_fastqc() {
     local out_dir="$TEST_DIR/fastqc_test"
     mkdir -p "$out_dir"
 
-    output=$("$BRUN" run --name "fastqc-qc" --project "qc" \
+    output=$("$BRUN" run -f --name "fastqc-qc" --project "qc" \
         -t quality-control \
         --cwd "$out_dir" \
         -- fastqc -o . -f fastq "$fq1" "$fq2" 2>&1) || true
@@ -213,7 +213,7 @@ test_bcftools_variant_calling() {
     samtools index "$out_dir/aln.bam" 2>/dev/null || true
 
     # mpileup + call
-    output=$("$BRUN" run --name "bcftools-call" --project "variant" \
+    output=$("$BRUN" run -f --name "bcftools-call" --project "variant" \
         -t snp -t indel \
         --cwd "$out_dir" \
         -- sh -c "bcftools mpileup -f $ref aln.bam | bcftools call -mv -Oz -o results/variants.vcf.gz" 2>&1) || true
@@ -225,7 +225,7 @@ test_bcftools_variant_calling() {
     fi
 
     # index vcf
-    output=$("$BRUN" run --name "bcftools-index" --project "variant" \
+    output=$("$BRUN" run -f --name "bcftools-index" --project "variant" \
         --cwd "$out_dir" \
         -- bcftools index results/variants.vcf.gz 2>&1) || true
 
@@ -236,7 +236,7 @@ test_bcftools_variant_calling() {
     fi
 
     # stats
-    output=$("$BRUN" run --name "bcftools-stats" --project "variant" \
+    output=$("$BRUN" run -f --name "bcftools-stats" --project "variant" \
         --cwd "$out_dir" \
         -- sh -c "bcftools stats results/variants.vcf.gz > results/vcf.stats" 2>&1) || true
 
@@ -267,7 +267,7 @@ chr1	400	450	featureY
 chr2	1100	1150	featureZ
 EOF
 
-    output=$("$BRUN" run --name "bedtools-intersect" --project "annotation" \
+    output=$("$BRUN" run -f --name "bedtools-intersect" --project "annotation" \
         -t bed -t intersect \
         --cwd "$out_dir" \
         -- sh -c "bedtools intersect -a a.bed -b b.bed > results/intersect.bed" 2>&1) || true
@@ -278,7 +278,7 @@ EOF
         fail "bedtools intersect 失败"
     fi
 
-    output=$("$BRUN" run --name "bedtools-coverage" --project "annotation" \
+    output=$("$BRUN" run -f --name "bedtools-coverage" --project "annotation" \
         --cwd "$out_dir" \
         -- sh -c "bedtools coverage -a a.bed -b b.bed > results/coverage.txt" 2>&1) || true
 
@@ -299,24 +299,24 @@ test_pipeline_workflow() {
 
     # 用独立命令模拟流水线各步骤（避免文件依赖导致失败）
     # Step 1: 产生输出文件的命令
-    out1=$("$BRUN" run --name "pipe-step1-map" --project "pipeline" \
+    out1=$("$BRUN" run -f --name "pipe-step1-map" --project "pipeline" \
         -t step-map -t workflowA \
         --cwd "$out_dir" \
         -- sh -c 'echo "sample_data" > output.txt && echo "mapped 1000 reads"' 2>&1) || true
     run1_id=$(echo "$out1" | extract_run_id)
 
     # Step 2-4: 独立命令（不依赖 Step 1 的文件）
-    "$BRUN" run --name "pipe-step2-sort" --project "pipeline" \
+    "$BRUN" run -f --name "pipe-step2-sort" --project "pipeline" \
         -t step-sort -t workflowA \
         --cwd "$out_dir" \
         -- sh -c 'echo "sorted"' > /dev/null 2>&1 || true
 
-    "$BRUN" run --name "pipe-step3-index" --project "pipeline" \
+    "$BRUN" run -f --name "pipe-step3-index" --project "pipeline" \
         -t step-index -t workflowA \
         --cwd "$out_dir" \
         -- sh -c 'echo "indexed"' > /dev/null 2>&1 || true
 
-    "$BRUN" run --name "pipe-step4-flagstat" --project "pipeline" \
+    "$BRUN" run -f --name "pipe-step4-flagstat" --project "pipeline" \
         -t step-qc -t workflowA \
         --cwd "$out_dir" \
         -- sh -c 'echo "flagstat: 1000 mapped"' > /dev/null 2>&1 || true
@@ -364,7 +364,7 @@ test_error_handling() {
     mkdir -p "$out_dir"
 
     # 不存在的命令
-    output=$("$BRUN" run --name "bad-cmd" --project "error-test" \
+    output=$("$BRUN" run -f --name "bad-cmd" --project "error-test" \
         --cwd "$out_dir" \
         -- nonexistent_command_abc123 2>&1) || true
 
@@ -375,7 +375,7 @@ test_error_handling() {
     fi
 
     # 非 zero exit code
-    output=$("$BRUN" run --name "fail-exit" --project "error-test" \
+    output=$("$BRUN" run -f --name "fail-exit" --project "error-test" \
         --cwd "$out_dir" \
         -- sh -c "exit 42" 2>&1) || true
 
@@ -404,7 +404,7 @@ test_concurrent_runs() {
 
     pids=()
     for i in $(seq 1 5); do
-        "$BRUN" run --name "concurrent-$i" --project "stress" \
+        "$BRUN" run -f --name "concurrent-$i" --project "stress" \
             --cwd "$out_dir" \
             -- sh -c "sleep 0.$((RANDOM % 5)) && echo hello_$i && sleep 0.$((RANDOM % 3))" \
             > "$out_dir/out_$i.log" 2>&1 &
@@ -450,7 +450,7 @@ test_logs_viewing() {
     mkdir -p "$out_dir"
 
     # 产生有 stdout/stderr 输出的命令
-    log_output=$("$BRUN" run --name "log-test" --project "logs" \
+    log_output=$("$BRUN" run -f --name "log-test" --project "logs" \
         --cwd "$out_dir" \
         -- sh -c 'echo "LINE1: starting"; echo "LINE2: processing"; echo "LINE3: done"; echo "ERR1: warning" >&2; echo "ERR2: error info" >&2' 2>&1) || true
     log_id=$(echo "$log_output" | extract_run_id)
@@ -502,7 +502,7 @@ test_fs_diff_detection() {
     mkdir -p "$out_dir"
 
     # 在 cwd 下产生新文件的命令 (不预创建 results/)
-    run_output=$("$BRUN" run --name "fs-diff-test" --project "auto-detect" \
+    run_output=$("$BRUN" run -f --name "fs-diff-test" --project "auto-detect" \
         --cwd "$out_dir" \
         -- sh -c '
             mkdir -p results
