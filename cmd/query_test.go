@@ -7,8 +7,8 @@ import (
 
 func TestFormatRunList(t *testing.T) {
 	runs := []RunRow{
-		{ID: "r1", Project: "p1", Status: "success", Duration: "1m23s", Command: "echo hi"},
-		{ID: "r2", Project: "p2", Status: "failed", Duration: "0s", Command: "ls /x"},
+		{ID: "r1", Name: "test-1", Project: "p1", Status: "success", Duration: "1m23s", Command: "echo hi"},
+		{ID: "r2", Name: "test-2", Project: "p2", Status: "failed", Duration: "0s", Command: "ls /x"},
 	}
 
 	output := FormatRunList(runs)

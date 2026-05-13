@@ -9,6 +9,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const maxRetries = 5
+
+var retryDelay = 50 * time.Millisecond
+
 type Store struct {
 	db *sql.DB
 }
@@ -51,7 +55,7 @@ func NewStore(path string) (*Store, error) {
 	dir := dirOf(path)
 	os.MkdirAll(dir, 0755)
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, err
 	}
@@ -106,16 +110,72 @@ func (s *Store) migrate() error {
 		);`,
 	}
 	for _, m := range migrations {
-		if _, err := s.db.Exec(m); err != nil {
+		if err := s.retryExec(m); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
 	return nil
 }
 
+// retryExec 带指数退避的重试执行，解决并发 SQLITE_BUSY
+func (s *Store) retryExec(query string, args ...any) error {
+	var lastErr error
+	delay := retryDelay
+	for i := 0; i < maxRetries; i++ {
+		_, lastErr = s.db.Exec(query, args...)
+		if lastErr == nil {
+			return nil
+		}
+		if !isBusyError(lastErr) {
+			return lastErr
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
+}
+
+// retryExecResult 同上但返回 sql.Result（用于需要 LastInsertId 的场景）
+func (s *Store) retryExecResult(query string, args ...any) (sql.Result, error) {
+	var lastErr error
+	var result sql.Result
+	delay := retryDelay
+	for i := 0; i < maxRetries; i++ {
+		result, lastErr = s.db.Exec(query, args...)
+		if lastErr == nil {
+			return result, nil
+		}
+		if !isBusyError(lastErr) {
+			return nil, lastErr
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return nil, fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
+}
+
+func isBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return contains(msg, "SQLITE_BUSY") || contains(msg, "database is locked")
+}
+
+func contains(s, sub string) bool { return len(s) >= len(sub) && searchString(s, sub) }
+
+func searchString(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	return s.retryExec(
 		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,created_at,updated_at)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
@@ -123,7 +183,6 @@ func (s *Store) CreateRun(r *Run) error {
 		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
 		now, now,
 	)
-	return err
 }
 
 func (s *Store) GetRun(id string) (*Run, error) {
@@ -141,14 +200,13 @@ func (s *Store) GetRun(id string) (*Run, error) {
 
 func (s *Store) UpdateRunStatus(id, status string, exitCode int, endedAt string, durationMs int64) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	return s.retryExec(
 		`UPDATE runs SET status=?, exit_code=?, ended_at=?, duration_ms=?, updated_at=? WHERE id=?`,
 		status, exitCode, endedAt, durationMs, now, id,
 	)
-	return err
 }
 
-func (s *Store) ListRuns(limit int, project, status, tag string) ([]*Run, error) {
+func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string) ([]*Run, error) {
 	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty FROM runs WHERE 1=1`
 	args := []any{}
 
@@ -163,6 +221,21 @@ func (s *Store) ListRuns(limit int, project, status, tag string) ([]*Run, error)
 	if tag != "" {
 		q += ` AND id IN (SELECT run_id FROM tags WHERE tag=?)`
 		args = append(args, tag)
+	}
+	if search != "" {
+		q += " AND (command LIKE ? OR name LIKE ?"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+	if since != "" {
+		q += " AND started_at>=?"
+		args = append(args, since)
+	}
+	if until != "" {
+		q += " AND started_at<=?"
+		args = append(args, until)
+	}
+	if search != "" {
+		q += ")"
 	}
 	q += " ORDER BY started_at DESC LIMIT ?"
 	args = append(args, limit)
@@ -188,7 +261,7 @@ func (s *Store) ListRuns(limit int, project, status, tag string) ([]*Run, error)
 }
 
 func (s *Store) GetLatestRun() (*Run, error) {
-	rows, err := s.ListRuns(1, "", "", "")
+	rows, err := s.ListRuns(1, "", "", "", "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +273,7 @@ func (s *Store) GetLatestRun() (*Run, error) {
 
 func (s *Store) AddTag(runID, tag string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`INSERT INTO tags (run_id,tag,created_at) VALUES(?,?,?)`, runID, tag, now)
-	return err
+	return s.retryExec(`INSERT INTO tags (run_id,tag,created_at) VALUES(?,?,?)`, runID, tag, now)
 }
 
 func (s *Store) GetTags(runID string) ([]string, error) {
@@ -224,9 +296,8 @@ func (s *Store) GetTags(runID string) ([]string, error) {
 
 func (s *Store) AddNote(runID, note string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	s.db.Exec(`DELETE FROM notes WHERE run_id=?`, runID)
-	_, err := s.db.Exec(`INSERT INTO notes (run_id,note,created_at) VALUES(?,?,?)`, runID, note, now)
-	return err
+	s.retryExec(`DELETE FROM notes WHERE run_id=?`, runID)
+	return s.retryExec(`INSERT INTO notes (run_id,note,created_at) VALUES(?,?,?)`, runID, note, now)
 }
 
 func (s *Store) GetNote(runID string) (string, error) {
@@ -240,7 +311,7 @@ func (s *Store) GetNote(runID string) (string, error) {
 
 func (s *Store) CreateArtifact(a *Artifact) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := s.db.Exec(
+	result, err := s.retryExecResult(
 		`INSERT INTO artifacts (run_id,kind,status,path,abs_path,stored_path,size_bytes,sha256,mtime,capture_method,created_at)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		a.RunID, a.Kind, a.Status, a.Path, a.AbsPath, a.StoredPath, a.Size, a.SHA256, a.Mtime, a.CaptureMethod, now,

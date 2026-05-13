@@ -98,7 +98,7 @@ func TestStore_ListRuns(t *testing.T) {
 		})
 	}
 
-	runs, err := s.ListRuns(10, "", "", "")
+	runs, err := s.ListRuns(10, "", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestStore_ListRuns_FilterByProject(t *testing.T) {
 	s.CreateRun(&Run{ID: "p1", Project: "alpha", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "p2", Project: "beta", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "alpha", "", "")
+	runs, _ := s.ListRuns(10, "alpha", "", "", "", "", "")
 	if len(runs) != 1 || runs[0].ID != "p1" {
 		t.Errorf("filter by project failed, got %d runs", len(runs))
 	}
@@ -129,7 +129,7 @@ func TestStore_ListRuns_FilterByStatus(t *testing.T) {
 	s.CreateRun(&Run{ID: "s1", Project: "p", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "f1", Project: "p", Command: "c", Status: "failed", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "", "failed", "")
+	runs, _ := s.ListRuns(10, "", "failed", "", "", "", "")
 	if len(runs) != 1 || runs[0].ID != "f1" {
 		t.Errorf("filter by status failed")
 	}

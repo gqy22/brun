@@ -7,6 +7,7 @@ import (
 
 type RunRow struct {
 	ID       string
+	Name     string
 	Project  string
 	Status   string
 	Duration string
@@ -43,14 +44,18 @@ func FormatRunList(runs []RunRow) string {
 		return "No runs found.\n"
 	}
 	var b strings.Builder
-	b.WriteString("RUN ID                   PROJECT        STATUS    DURATION   COMMAND\n")
-	b.WriteString("----                     -------         ------    --------   -------\n")
+	b.WriteString("RUN ID                   NAME            PROJECT        STATUS    DURATION   COMMAND\n")
+	b.WriteString("----                     ----            -------         ------    --------   -------\n")
 	for _, r := range runs {
-		cmd := r.Command
-		if len(cmd) > 40 {
-			cmd = cmd[:37] + "..."
+		name := r.Name
+		if len(name) > 15 {
+			name = name[:12] + "..."
 		}
-		fmt.Fprintf(&b, "%-24s %-15s %-9s %-10s %s\n", r.ID, r.Project, r.Status, r.Duration, cmd)
+		cmd := r.Command
+		if len(cmd) > 35 {
+			cmd = cmd[:32] + "..."
+		}
+		fmt.Fprintf(&b, "%-24s %-16s %-15s %-9s %-10s %s\n", r.ID, name, r.Project, r.Status, r.Duration, cmd)
 	}
 	return b.String()
 }
@@ -127,7 +132,7 @@ func FormatSize(bytes int64) string {
 }
 
 func TailLog(content string, n int) string {
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	if n >= len(lines) {
 		return content
 	}

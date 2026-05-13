@@ -69,8 +69,8 @@ func initCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var name, project, note string
-	var tags, inputs, outputs []string
-	var noFsDiff, hashOutputs, copyOutputs bool
+	var tags []string
+	var noFsDiff bool
 	var timeout int
 	var cwdFlag string
 
@@ -78,26 +78,25 @@ func runCmd() *cobra.Command {
 		Use:   "run -- <command...>",
 		Short: "执行命令并记录运行信息",
 		RunE: func(c *cobra.Command, args []string) error {
-			return executeRun(args, name, project, note, tags, inputs, outputs,
-				noFsDiff, hashOutputs, copyOutputs, time.Duration(timeout)*time.Second, cwdFlag)
+			return executeRun(args, name, project, note, tags,
+				noFsDiff, time.Duration(timeout)*time.Second, cwdFlag)
 		},
 	}
-	c.Flags().StringVar(&name, "name", "", "run 名称")
-	c.Flags().StringVar(&project, "project", "", "项目名")
+	c.Flags().StringVarP(&name, "name", "n", "", "run 名称")
+	c.Flags().StringVarP(&project, "project", "p", "", "项目名")
 	c.Flags().StringVar(&note, "note", "", "备注")
-	c.Flags().StringArrayVar(&tags, "tag", []string{}, "标签")
-	c.Flags().StringArrayVar(&inputs, "input", []string{}, "输入文件")
-	c.Flags().StringArrayVar(&outputs, "output", []string{}, "输出文件")
+	c.Flags().StringArrayVarP(&tags, "tag", "t", []string{}, "标签 (支持逗号分隔: -t align,hg38)")
 	c.Flags().BoolVar(&noFsDiff, "no-fs-diff", false, "禁用文件系统 diff")
-	c.Flags().BoolVar(&hashOutputs, "hash-outputs", false, "计算输出文件 hash")
-	c.Flags().BoolVar(&copyOutputs, "copy-outputs", false, "复制输出文件")
 	c.Flags().IntVar(&timeout, "timeout", 0, "超时(秒)")
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录")
 	return c
 }
 
-func executeRun(args []string, name, project, note string, tags, inputs, outputs []string,
-	noFsDiff, hashOutputs, copyOutputs bool, timeout time.Duration, cwdFlag string) error {
+func executeRun(args []string, name, project, note string, tags []string,
+	noFsDiff bool, timeout time.Duration, cwdFlag string) error {
+
+	// 支持逗号分隔: -t align,hg38 等价于 -t align -t hg38
+	tags = splitComma(tags)
 
 	if len(args) == 0 {
 		return fmt.Errorf("需要指定要执行的命令，使用: brun run -- <command>")
@@ -182,7 +181,7 @@ func executeRun(args []string, name, project, note string, tags, inputs, outputs
 	result := cmd.ExecuteCommand(args, cwd, stdoutPath, stderrPath, timeout)
 
 	// 11. after 快照 + diff
-	if !noFsDiff && len(beforeSnapshot) > 0 {
+	if !noFsDiff {
 		afterSnapshot, _ := internal.SnapshotDir(cwd, cfg.Ignore)
 		created, modified, deleted := internal.DiffSnapshots(beforeSnapshot, afterSnapshot)
 
@@ -228,17 +227,7 @@ func executeRun(args []string, name, project, note string, tags, inputs, outputs
 		}
 	}
 
-	// 12. 处理显式声明的 outputs
-	for _, out := range outputs {
-		store.CreateArtifact(&internal.Artifact{
-			RunID:  runID,
-			Kind:   "output",
-			Status: "declared",
-			Path:   out,
-		})
-	}
-
-	// 13. 处理 tags 和 note
+	// 12. 处理 tags 和 note
 	for _, t := range tags {
 		store.AddTag(runID, t)
 	}
@@ -246,13 +235,13 @@ func executeRun(args []string, name, project, note string, tags, inputs, outputs
 		store.AddNote(runID, note)
 	}
 
-	// 14. 更新 DB status
+	// 13. 更新 DB status
 	if err := store.UpdateRunStatus(runID, result.Status, result.ExitCode,
 		result.EndedAt, result.DurationMs); err != nil {
 		return fmt.Errorf("更新状态失败: %w", err)
 	}
 
-	// 15. 更新 runRecord 并写 metadata.yaml
+	// 14. 更新 runRecord 并写 metadata.yaml
 	runRecord.Status = result.Status
 	runRecord.ExitCode = result.ExitCode
 	runRecord.EndedAt = result.EndedAt
@@ -260,7 +249,7 @@ func executeRun(args []string, name, project, note string, tags, inputs, outputs
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
 	os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644)
 
-	// 16. 打印摘要
+	// 15. 打印摘要
 	fmt.Printf("\nCommand finished %s in %s\n", result.Status, cmd.DurationString(result.DurationMs))
 	arts, _ := store.GetArtifacts(runID)
 	if len(arts) > 0 {
@@ -273,7 +262,7 @@ func executeRun(args []string, name, project, note string, tags, inputs, outputs
 // --- list ---
 
 func listCmd() *cobra.Command {
-	var project, status, tag string
+	var project, status, tag, search, since, until string
 	var limit int
 
 	cc := &cobra.Command{
@@ -286,7 +275,15 @@ func listCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			runs, err := store.ListRuns(limit, project, status, tag)
+			sinceVal, untilVal := since, until
+			if since != "" {
+				sinceVal = parseTimeFilter(since)
+			}
+			if until != "" {
+				untilVal = parseTimeFilter(until)
+			}
+
+			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal)
 			if err != nil {
 				return err
 			}
@@ -295,6 +292,7 @@ func listCmd() *cobra.Command {
 			for i, r := range runs {
 				rows[i] = cmd.RunRow{
 					ID:       r.ID,
+					Name:     r.Name,
 					Project:  r.Project,
 					Status:   r.Status,
 					Duration: cmd.DurationString(r.DurationMs),
@@ -305,9 +303,12 @@ func listCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cc.Flags().StringVar(&project, "project", "", "按项目过滤")
-	cc.Flags().StringVar(&status, "status", "", "按状态过滤 (success/failed/running)")
-	cc.Flags().StringVar(&tag, "tag", "", "按 tag 过滤")
+	cc.Flags().StringVarP(&project, "project", "p", "", "按项目过滤")
+	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (success/failed/running)")
+	cc.Flags().StringVarP(&tag, "tag", "t", "", "按 tag 过滤")
+	cc.Flags().StringVarP(&search, "search", "s", "", "在命令/名称中搜索关键词")
+	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (如: 2026-05-13, 1h, today)")
+	cc.Flags().StringVar(&until, "until", "", "显示此时间之前的记录")
 	cc.Flags().IntVar(&limit, "limit", 20, "限制数量")
 	return cc
 }
@@ -586,8 +587,8 @@ func rerunCmd() *cobra.Command {
 				// 继承 tags 到新 run
 				_ = tags
 			}
-			return executeRun(origArgs, name, r.Project, "", nil, nil, nil,
-				false, false, false, 0, execCWD)
+			return executeRun(origArgs, name, r.Project, "", nil,
+				false, 0, execCWD)
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")
@@ -617,7 +618,7 @@ func cleanCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			runs, err := store.ListRuns(1000, "", "", "")
+			runs, err := store.ListRuns(1000, "", "", "", "", "", "")
 			if err != nil {
 				return err
 			}
@@ -646,6 +647,55 @@ func cleanCmd() *cobra.Command {
 }
 
 // --- 辅助函数 ---
+
+func splitComma(items []string) []string {
+	var out []string
+	for _, item := range items {
+		for _, s := range strings.Split(item, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// parseTimeFilter 将用户输入的时间过滤值转为 RFC3339
+// 支持: "2026-05-13", "1h", "2d", "today", "1w"
+func parseTimeFilter(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// 尝试直接解析为日期
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	if _, err := time.Parse(time.RFC3339, s); err == nil {
+		return s
+	}
+
+	// 相对时间
+	now := time.Now().UTC()
+	switch {
+	case s == "today":
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339)
+	case strings.HasSuffix(s, "h"):
+		var n int
+		fmt.Sscanf(s, "%d", &n)
+		return now.Add(-time.Duration(n) * time.Hour).Format(time.RFC3339)
+	case strings.HasSuffix(s, "d"):
+		var n int
+		fmt.Sscanf(s, "%d", &n)
+		return now.Add(-time.Duration(n) * 24 * time.Hour).Format(time.RFC3339)
+	case strings.HasSuffix(s, "w"):
+		var n int
+		fmt.Sscanf(s, "%d", &n)
+		return now.Add(-time.Duration(n) * 7 * 24 * time.Hour).Format(time.RFC3339)
+	default:
+		return s // 原样返回，让 SQL 查询自然失败
+	}
+}
 
 func hostname() string {
 	h, _ := os.Hostname()
