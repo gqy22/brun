@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-BRUN="$(cd "$(dirname "$0")/.." && pwd)/brun"
+BRUN="$(cd "$(dirname "$0")/.." && pwd)/bin/brun"
 TEST_DIR=$(mktemp -d /tmp/brun-e2e-XXXXXX)
 PASS=0
 FAIL=0

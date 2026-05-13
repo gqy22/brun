@@ -1,17 +1,34 @@
 # 编译产物
-/brun
+/bin/
 /dist/
 
-# 测试
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 *.test
 *.out
+*.prof
 coverage.txt
+
+# 模块缓存
+vendor/
+
+# 测试临时数据
+*.db
+*.db-wal
+*.db-shm
+/tmp/
+/test_e2e/__pycache__/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
