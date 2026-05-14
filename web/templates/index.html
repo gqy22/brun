@@ -32,27 +32,29 @@
         <option value="">所有标签</option>
       </select>
       <input type="text" id="filter-search" placeholder="搜索命令..." class="filter-input">
-      <button onclick="loadRuns()" class="btn btn-sm">刷新</button>
+      <button onclick="loadRuns()" class="btn btn-sm btn-outline" id="btn-refresh">刷新</button>
     </div>
 
     <!-- 运行列表 -->
-    <table class="table" id="runs-table">
-      <thead>
-        <tr>
-          <th>Run ID</th>
-          <th>Name</th>
-          <th>Project</th>
-          <th>Status</th>
-          <th>Duration</th>
-          <th>Command</th>
-          <th>Started</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="runs-tbody">
-        <tr><td colspan="8" class="text-center text-muted">加载中...</td></tr>
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table" id="runs-table">
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Name</th>
+            <th>Project</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Command</th>
+            <th>Started</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="runs-tbody">
+          <tr><td colspan="8" class="text-center text-muted">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>
@@ -70,17 +72,9 @@
         fetch('/api/tags').then(r => r.json()),
       ]);
       const projSel = document.getElementById('filter-project');
-      projects.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p; opt.textContent = p;
-        projSel.appendChild(opt);
-      });
+      projects.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; projSel.appendChild(o); });
       const tagSel = document.getElementById('filter-tag');
-      tags.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t; opt.textContent = t;
-        tagSel.appendChild(opt);
-      });
+      tags.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; tagSel.appendChild(o); });
       ['filter-project','filter-status','filter-tag','filter-search'].forEach(id => {
         document.getElementById(id).addEventListener('change', loadRuns);
         document.getElementById(id).addEventListener('input', debounce(loadRuns, 300));
@@ -105,21 +99,21 @@
         const tbody = document.getElementById('runs-tbody');
 
         if (!Array.isArray(runs) || runs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">暂无运行记录</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:48px 0">暂无运行记录</td></tr>';
           if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
           return;
         }
 
-        tbody.innerHTML = runs.map(r => `
-          <tr class="row-clickable" onclick="location.href='/run/${r.id}'">
-            <td><code class="run-id">${r.id}</code></td>
-            <td>${esc(r.name) || '-'}</td>
-            <td>${esc(r.project) || '-'}</td>
+        tbody.innerHTML = runs.map((r, i) => `
+          <tr class="row-clickable animate-in" style="animation-delay: ${i * 35}ms" onclick="location.href='/run/${r.id}'">
+            <td><code class="run-id">${esc(r.id)}</code></td>
+            <td>${esc(r.name) || '<span class=text-muted>-</span>'}</td>
+            <td>${esc(r.project) || '<span class=text-muted>-</span>'}</td>
             <td><span class="badge badge-${r.status}">${r.status}</span></td>
-            <td>${r.duration}</td>
+            <td>${r.duration || '-'}</td>
             <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
-            <td class="text-muted">${fmtTime(r.started_at)}</td>
-            <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-outline btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
+            <td class="text-muted" style="font-size:13px">${fmtTime(r.started_at)}</td>
+            <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
           </tr>
         `).join('');
 
@@ -138,19 +132,17 @@
       }
     }
 
+    async function deleteRun(id, e) {
+      modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
+        const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
+        const d = await r.json();
+        if (d.ok) { toast('success', '已删除'); loadRuns(); }
+        else toast('error', d.error || '删除失败');
+      });
+    }
+
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-
-    async function deleteRun(id, e) {
-      if (!confirm('确定删除这条运行记录？\n将同时删除日志和输出文件，不可恢复。')) return;
-      const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
-      const d = await r.json();
-      if (d.ok) {
-        loadRuns();
-      } else {
-        alert(d.error || '删除失败');
-      }
-    }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
   </script>
 </body>

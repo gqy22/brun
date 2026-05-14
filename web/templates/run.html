@@ -16,46 +16,56 @@
     </div>
   </nav>
 
-  <main class="container">
+  <main class="container detail-page">
     <!-- 返回 + 操作栏 -->
     <div class="detail-header">
       <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
       <span class="detail-actions">
         <button id="btn-kill" class="btn btn-sm btn-danger" style="display:none" onclick="doKill()">终止</button>
         <button id="btn-rerun" class="btn btn-sm btn-primary" style="display:none" onclick="doRerun()">重跑</button>
-        <button id="btn-delete" class="btn btn-sm btn-outline" onclick="doDelete()">删除</button>
-        <button id="btn-copy-cmd" class="btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
+        <button id="btn-delete" class="btn btn-sm btn-outline" style="display:none" onclick="doDelete()">删除</button>
+        <button id="btn-copy-cmd" class="btn btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
       </span>
     </div>
 
-    <!-- 信息面板 -->
-    <div class="info-grid" id="info-panel">
-      <p class="text-muted">加载中...</p>
-    </div>
+    <!-- 左右分栏主体 -->
+    <div class="detail-body">
+      <!-- 左侧：基本信息 -->
+      <aside class="detail-sidebar">
+        <div class="sidebar-card" id="info-panel">
+          <p class="text-muted">加载中...</p>
+        </div>
+      </aside>
 
-    <!-- 日志查看器 -->
-    <div class="log-viewer">
-      <div class="log-tabs">
-        <button class="log-tab active" data-stream="stdout" onclick="switchLog('stdout')">stdout</button>
-        <button class="log-tab" data-stream="stderr" onclick="switchLog('stderr')">stderr</button>
-        <div class="log-toolbar">
-          <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value="">
-          <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px">
-          <label class="checkbox-inline">
-            <input type="checkbox" id="auto-refresh" checked> auto-refresh
-          </label>
+      <!-- 右侧：日志 + 输出文件 -->
+      <div class="detail-main">
+        <!-- 日志查看器 -->
+        <div class="log-viewer">
+          <div class="log-tabs">
+            <button class="log-tab active" data-stream="stdout" onclick="switchLog('stdout')">stdout</button>
+            <button class="log-tab" data-stream="stderr" onclick="switchLog('stderr')">stderr</button>
+            <div class="log-toolbar">
+              <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value="">
+              <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px">
+              <label class="checkbox-inline">
+                <input type="checkbox" id="auto-refresh" checked> auto-refresh
+              </label>
+            </div>
+          </div>
+          <pre class="log-content" id="log-content"></pre>
+        </div>
+
+        <!-- 输出文件 -->
+        <div class="section">
+          <h3>输出文件</h3>
+          <div class="table-wrap">
+            <table class="table" id="arts-table">
+              <thead><tr><th>Type</th><th>Status</th><th>Size</th><th>Path</th></tr></thead>
+              <tbody id="arts-tbody"><tr><td colspan="4" class="text-muted">-</td></tr></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <pre class="log-content" id="log-content"></pre>
-    </div>
-
-    <!-- 输出文件 -->
-    <div class="section">
-      <h3>输出文件</h3>
-      <table class="table" id="arts-table">
-        <thead><tr><th>Type</th><th>Status</th><th>Size</th><th>Path</th></tr></thead>
-        <tbody id="arts-tbody"><tr><td colspan="4" class="text-muted">-</td></tr></tbody>
-      </table>
     </div>
   </main>
 
@@ -67,7 +77,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       loadDetail();
-      // 搜索回车触发
       document.getElementById('log-search').addEventListener('input', debounce(renderLog, 200));
       document.getElementById('log-tail').addEventListener('change', () => loadLog());
     });
@@ -77,35 +86,81 @@
       if (r.status === 404) { document.getElementById('info-panel').innerHTML = '<p class="text-danger">Run not found</p>'; return; }
       const d = await r.json();
 
-      // 标题
       document.title = `${d.name || d.id} - brun`;
 
-      // 信息面板
-      document.getElementById('info-panel').innerHTML = `
-        <div class="info-item"><label>Run ID</label><code>${d.id}</code></div>
-        ${d.name ? `<div class="info-item"><label>Name</label>${esc(d.name)}</div>` : ''}
-        <div class="info-item"><label>Project</label>${esc(d.project) || '-'}</div>
-        <div class="info-item"><label>Status</label><span class="badge badge-${d.status}">${d.status}</span></div>
-        <div class="info-item"><label>Command</label><code class="cmd-full" id="cmd-text">${esc(d.command)}</code></div>
-        <div class="info-item"><label>CWD</label><code class="cwd-path">${esc(d.cwd)}</code></div>
-        <div class="info-item"><label>Started</label>${fmtTime(d.started_at)}</div>
-        <div class="info-item"><label>Ended</label>${fmtTime(d.ended_at) || '-'}</div>
-        <div class="info-item"><label>Duration</label>${d.duration || '-'}</div>
-        <div class="info-item"><label>Exit Code</label>${d.exit_code ?? '-'}</div>
-        ${d.git_commit ? `<div class="info-item"><label>Git</label><code>${esc(d.git_commit.substring(0,8))}${d.git_dirty ? ' (dirty)' : ''}</code></div>` : ''}
-        ${d.tags?.length ? `<div class="info-item"><label>Tags</label>${d.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div>` : ''}
-        ${d.note ? `<div class="info-item"><label>Note</label>${esc(d.note)}</div>` : ''}
+      // 左侧信息面板 — 紧凑分组
+      const panel = document.getElementById('info-panel');
+      panel.className = `sidebar-card status-${d.status}`;
+      panel.innerHTML = `
+        <!-- 核心信息 -->
+        <div class="side-info">
+          <label>Run ID</label>
+          <div class="side-value"><code>${esc(d.id)}</code></div>
+        </div>
+        ${d.name ? `<div class="side-info"><label>Name</label><div class="side-value">${esc(d.name)}</div></div>` : ''}
+
+        <div class="side-group-title">执行状态</div>
+        <div class="side-info">
+          <label>Status</label>
+          <div class="side-value"><span class="badge badge-${d.status}">${d.status}</span></div>
+        </div>
+        <div class="side-info">
+          <label>Duration</label>
+          <div class="side-value"><strong style="font-size:18px">${d.duration || '-'}</strong></div>
+        </div>
+        <div class="side-info">
+          <label>Exit Code</label>
+          <div class="side-value"><code>${d.exit_code ?? '-'}</code></div>
+        </div>
+
+        <div class="side-group-title">命令与环境</div>
+        <div class="side-info">
+          <label>Command</label>
+          <div class="cmd-compact" id="cmd-text">${esc(d.command)}<button class="cmd-copy-btn" onclick="copyCmd()" title="复制命令">复制</button></div>
+        </div>
+        <div class="side-info">
+          <label>Project</label>
+          <div class="side-value">${esc(d.project) || '<span class=text-muted>-</span>'}</div>
+        </div>
+        <div class="side-info">
+          <label>CWD</label>
+          <div class="side-value" title="${esc(d.cwd)}" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.cwd)}</div>
+        </div>
+
+        <div class="side-group-title">时间信息</div>
+        <div class="side-info">
+          <label>Started</label>
+          <div class="side-value">${fmtTime(d.started_at)}<span class="text-muted" style="margin-left:6px;font-size:12px">${timeAgo(d.started_at)}</span></div>
+        </div>
+        <div class="side-info">
+          <label>Ended</label>
+          <div class="side-value">${fmtTime(d.ended_at) || '<span class=text-muted>-</span>'}</div>
+        </div>
+
+        ${d.git_commit ? `
+        <div class="side-group-title">版本信息</div>
+        <div class="side-info">
+          <label>Git</label>
+          <div class="side-value"><code>${esc(d.git_commit.substring(0,8))}${d.git_dirty ? ' (dirty)' : ''}</code></div>
+        </div>` : ''}
+        ${d.tags?.length ? `
+        <div class="side-info">
+          <label>Tags</label>
+          <div class="side-value">${d.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div>
+        </div>` : ''}
+        ${d.note ? `
+        <div class="side-info">
+          <label>Note</label>
+          <div class="side-value">${esc(d.note)}</div>
+        </div>` : ''}
       `;
 
-      // 重跑按钮 + 终止按钮
+      // 操作按钮
       if (d.command) document.getElementById('btn-rerun').style.display = '';
       if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
       if (d.status !== 'running') document.getElementById('btn-delete').style.display = '';
 
-      // 输出文件
       loadArtifacts();
-
-      // 日志
       loadLog();
       setupAutoRefresh(d.status === 'running');
     }
@@ -113,7 +168,7 @@
     async function loadArtifacts() {
       const arts = await fetch('/api/runs/' + RUN_ID + '/artifacts').then(r => r.json());
       const tb = document.getElementById('arts-tbody');
-      if (!arts.length) { tb.innerHTML = '<tr><td colspan="4" class="text-muted">无输出文件</td></tr>'; return; }
+      if (!arts.length) { tb.innerHTML = '<tr><td colspan="4" class="text-muted" style="padding:20px">无输出文件</td></tr>'; return; }
       tb.innerHTML = arts.map(a => `<tr><td>${esc(a.kind)}</td><td><span class="badge badge-${a.status}">${a.status}</span></td><td>${a.size}</td><td>${esc(a.path)}</td></tr>`).join('');
     }
 
@@ -156,44 +211,40 @@
     });
 
     async function doRerun() {
-      if (!confirm('确定要重跑这个命令？')) return;
-      const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
-      const d = await r.json();
-      alert(d.ok ? `已启动 (PID: ${d.pid})` : (d.error || '失败'));
-    }
-
-    async function doKill() {
-      if (!confirm('确定要终止这个运行中的任务？')) return;
-      const r = await fetch('/api/runs/' + RUN_ID + '/kill', { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) {
-        alert(`已终止进程 PID: ${d.killed}`);
-        setTimeout(() => location.reload(), 1000);
-      } else {
-        alert(d.error || '终止失败');
-      }
-    }
-
-    function copyCmd() {
-      const cmd = document.getElementById('cmd-text')?.textContent || '';
-      navigator.clipboard.writeText(cmd).then(() => {
-        const b = document.getElementById('btn-copy-cmd');
-        const orig = b.textContent;
-        b.textContent = '已复制!';
-        setTimeout(() => b.textContent = orig, 1500);
+      modalConfirm('确认重跑', '确定要重新运行这个命令？', async () => {
+        const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
+        const d = await r.json();
+        toast(d.ok ? 'success' : 'error', d.ok ? `已启动 (PID: ${d.pid})` : (d.error || '失败'));
       });
     }
 
+    async function doKill() {
+      modalConfirm('确认终止', '确定要终止这个运行中的任务？', async () => {
+        const r = await fetch('/api/runs/' + RUN_ID + '/kill', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { toast('success', `已终止 PID: ${d.killed}`); setTimeout(() => location.reload(), 1000); }
+        else toast('error', d.error || '终止失败');
+      });
+    }
+
+    function copyCmd() {
+      var cmd = '';
+      var el = document.getElementById('cmd-text');
+      if (el) cmd = el.childNodes[0].textContent || ''; // 取纯文本，排除按钮
+      navigator.clipboard.writeText(cmd).then(() => {
+        toast('success', '命令已复制到剪贴板');
+        var btn = el ? el.querySelector('.cmd-copy-btn') : null;
+        if (btn) { var orig = btn.textContent; btn.textContent = '已复制!'; setTimeout(() => btn.textContent = orig, 1200); }
+      }).catch(() => toast('error', '复制失败'));
+    }
+
     async function doDelete() {
-      if (!confirm('确定要删除这条运行记录？\n将同时删除日志和输出文件，不可恢复。')) return;
-      const r = await fetch('/api/runs/' + RUN_ID, { method: 'DELETE' });
-      const d = await r.json();
-      if (d.ok) {
-        alert('已删除');
-        location.href = '/';
-      } else {
-        alert(d.error || '删除失败');
-      }
+      modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
+        const r = await fetch('/api/runs/' + RUN_ID, { method: 'DELETE' });
+        const d = await r.json();
+        if (d.ok) { toast('success', '已删除'); setTimeout(() => location.href = '/', 600); }
+        else toast('error', d.error || '删除失败');
+      });
     }
 
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
