@@ -17,6 +17,38 @@ import (
 
 var version = "0.1.0"
 
+const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
+
+{{end}}{{if .Example}}
+示例:
+{{.Example}}
+{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
+
+const usageTemplate = `用法: {{.UseLine}}
+
+{{if .HasAvailableSubCommands}}
+可用命令:
+{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}
+{{end}}
+{{if .HasAvailableLocalFlags}}
+选项:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}
+{{if .HasAvailableInheritedFlags}}
+全局选项:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}
+{{if .HasHelpSubCommands}}
+更多帮助命令:
+{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}
+{{end}}
+{{if .HasAvailableSubCommands}}
+使用 "{{.CommandPath}} [命令] --help" 获取更多信息
+{{end}}
+`
+
 // 注入值: -X main.commit=xxx -X main.buildDate=xxx
 var commit string
 var buildDate string
@@ -29,6 +61,8 @@ func main() {
 通过 brun run -- <command> 包装任意命令，自动记录日志、环境、Git 信息和输出文件。`,
 		Version: version,
 	}
+	rootCmd.SetHelpTemplate(helpTemplate)
+	rootCmd.SetUsageTemplate(usageTemplate)
 
 	rootCmd.AddCommand(
 		initCmd(),
@@ -42,6 +76,47 @@ func main() {
 		rerunCmd(),
 		cleanCmd(),
 	)
+	// 替换内置命令为中文描述
+	rootCmd.SetHelpCommand(&cobra.Command{
+		Use:   "help [command]",
+		Short: "查看帮助信息",
+		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return rootCmd.Help()
+			}
+			c2, _, err := rootCmd.Find(args)
+			if err != nil {
+				return err
+			}
+			return c2.Help()
+		},
+	})
+	// 禁用 cobra 默认的英文 help/version flag，改用中文版本
+	rootCmd.PersistentFlags().BoolP("help", "h", false, "显示帮助信息")
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "completion [bash|zsh|fish|powershell]",
+		Short: "生成指定 shell 的自动补全脚本",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return rootCmd.GenBashCompletion(os.Stdout)
+			case "zsh":
+				return rootCmd.GenZshCompletion(os.Stdout)
+			case "fish":
+				return rootCmd.GenFishCompletion(os.Stdout, true)
+			case "powershell":
+				return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
+			default:
+				return fmt.Errorf("不支持的 shell: %s (支持: bash, zsh, fish, powershell)", args[0])
+			}
+		},
+	})
+	rootCmd.RegisterFlagCompletionFunc("help", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
+	rootCmd.PersistentFlags().BoolP("version", "v", false, "显示版本号")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -80,8 +155,30 @@ func runCmd() *cobra.Command {
 	var foreground bool
 
 	c := &cobra.Command{
-		Use:   "run -- <command...>",
-		Short: "执行命令并记录运行信息 (默认后台运行)",
+		Use:     "run -- <command...>",
+			Short:   "执行命令并记录运行信息 (默认 nohup 后台运行)",
+		Long:    "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
+		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
+  brun run -- python train.py --epochs 50
+  # 等效于: nohup python train.py --epochs 50 > ~/.local/share/brun/runs/<id>/stdout.o 2> ~/.local/share/brun/runs/<id>/stderr.er &
+
+  # 带项目名和标签
+  brun run -p genome-align -t hg38,pep-align -- bwa mem ref.fa reads.fq > aligned.sam
+
+  # 前台运行（适合交互式调试）
+  brun run -f -- snakemake -j 8
+
+  # 指定名称和备注
+  brun run -n "qc-report" --note "样本质量控制" -- fastqc *.fastq.gz
+
+  # 允许特定非零退出码
+  brun run --allow-exit 1,2 -- samtools view -b input.bam "chr1:1-1000"
+
+  # 在指定目录运行
+  brun run --cwd /data/project -- Rscript analysis.R
+
+  # 设置超时
+  brun run --timeout 3600 -- python long_running_job.py`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if foreground {
 				return executeRun(args, name, project, note, tags,
@@ -99,7 +196,7 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&allowExit, "allow-exit", "", "允许的非零退出码 (逗号分隔，如: 1,2,127)")
 	c.Flags().IntVar(&timeout, "timeout", 0, "超时(秒)")
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录")
-	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认后台)")
+	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
 	return c
 }
 
@@ -188,8 +285,8 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 10. 执行命令
-	stdoutPath := filepath.Join(runDir, "stdout.log")
-	stderrPath := filepath.Join(runDir, "stderr.log")
+	stdoutPath := filepath.Join(runDir, "stdout.o")
+	stderrPath := filepath.Join(runDir, "stderr.er")
 	result := cmd.ExecuteCommand(args, cwd, stdoutPath, stderrPath, timeout)
 
 	// 11. after 快照 + diff
@@ -277,7 +374,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	return nil
 }
 
-// detachRun 将当前命令以后台方式重新执行，父进程立即退出
+// detachRun 将命令以后台 nohup 方式执行，等效于 nohup cmd > out.o 2> out.er &
 func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
 	noFsDiff bool, allowExit string, timeout int, cwdFlag string) error {
 
@@ -317,29 +414,46 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 		return fmt.Errorf("获取可执行路径失败: %w", err)
 	}
 
-	// 后台日志文件
-	os.MkdirAll(internal.HomeDir(), 0755)
-	detachLog := filepath.Join(internal.HomeDir(), "detach.log")
-	f, err := os.OpenFile(detachLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// 生成 run ID 用于输出文件命名
+	runID := internal.GenerateRunID()
+
+	// 输出目录: ~/.local/share/brun/runs/<run_id>/
+	runDir := internal.RunDir(runID)
+	os.MkdirAll(runDir, 0755)
+
+	stdoutPath := filepath.Join(runDir, "stdout.o")
+	stderrPath := filepath.Join(runDir, "stderr.er")
+
+	stdoutF, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return fmt.Errorf("创建后台日志失败: %w", err)
+		return fmt.Errorf("创建 stdout 文件失败: %w", err)
+	}
+	stderrF, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		stdoutF.Close()
+		return fmt.Errorf("创建 stderr 文件失败: %w", err)
 	}
 
 	cmd := exec.Command(exePath, childArgs...)
-	cmd.Stdout = f
-	cmd.Stderr = f
+	cmd.Stdout = stdoutF
+	cmd.Stderr = stderrF
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
+		Setsid:  true,
 	}
 
 	if err := cmd.Start(); err != nil {
-		f.Close()
+		stdoutF.Close()
+		stderrF.Close()
 		return fmt.Errorf("启动后台进程失败: %w", err)
 	}
-	f.Close()
+	stdoutF.Close()
+	stderrF.Close()
 
-	fmt.Printf("[detach] PID=%d, 日志: %s\n", cmd.Process.Pid, detachLog)
-	fmt.Printf("[detach] 使用 'brun list' 查看运行状态\n")
+	fmt.Printf("[nohup] PID=%d, RunID=%s\n", cmd.Process.Pid, runID)
+	fmt.Printf("[nohup] stdout: %s\n", stdoutPath)
+	fmt.Printf("[nohup] stderr: %s\n", stderrPath)
+	fmt.Printf("[nohup] 使用 'brun list' 查看运行状态\n")
 	return nil
 }
 
