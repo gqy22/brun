@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -131,14 +132,34 @@ func openStore() (*internal.Store, error) {
 
 func initCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init",
-		Short: "在当前目录生成 brun.yaml",
+		Use:     "init [项目名]",
+		Short:   "在当前目录生成 brun.yaml",
+		Long:    "在当前目录生成 brun.yaml 配置文件，用于定义项目名称、捕获规则和忽略模式。",
+		Example: `  # 在当前目录初始化（使用当前目录名作为项目名）
+  brun init
+
+  # 指定项目名
+  brun init my-genome-project`,
 		RunE: func(c *cobra.Command, args []string) error {
 			project := ""
 			if len(args) > 0 {
 				project = args[0]
 			}
-			return cmd.WriteInitFile(".", project)
+
+			cfgPath := filepath.Join(".", "brun.yaml")
+			if _, err := os.Stat(cfgPath); err == nil {
+				return fmt.Errorf("brun.yaml 已存在，如需重新生成请先删除")
+			}
+
+			err := cmd.WriteInitFile(".", project)
+			if err != nil {
+				return fmt.Errorf("生成配置失败: %w", err)
+			}
+
+			fmt.Printf("✓ 配置文件已生成: %s\n", cfgPath)
+			fmt.Printf("  可编辑此文件自定义捕获规则和忽略模式\n")
+			fmt.Printf("  使用 'brun run -- <command>' 开始记录运行\n")
+			return nil
 		},
 	}
 }
@@ -284,10 +305,21 @@ func executeRun(args []string, name, project, note string, tags []string,
 		beforeSnapshot, _ = internal.SnapshotDir(cwd, cfg.Ignore)
 	}
 
-	// 10. 执行命令
+	// 10. 执行命令（带信号处理）
 	stdoutPath := filepath.Join(runDir, "stdout.o")
 	stderrPath := filepath.Join(runDir, "stderr.er")
-	result := cmd.ExecuteCommand(args, cwd, stdoutPath, stderrPath, timeout)
+
+	// 设置信号处理：Ctrl+C 时优雅终止子进程
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	go func() {
+		<-sigCh
+		fmt.Printf("\n[信号] 收到中断信号，正在优雅停止...\n")
+	}()
+
+	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh)
 
 	// 11. after 快照 + diff
 	if !noFsDiff {
@@ -572,6 +604,15 @@ func logsCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "logs <run_id|latest>",
 		Short: "查看运行日志",
+		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。",
+		Example: `  # 查看最新运行的日志
+  brun logs latest
+
+  # 实时跟踪正在运行的命令输出
+  brun logs latest -f
+
+  # 只看最后 50 行 stderr
+  brun logs <run_id> --stderr --tail 50`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			runID, isLatest := cmd.ResolveRunID(args[0])
@@ -591,27 +632,22 @@ func logsCmd() *cobra.Command {
 				return err
 			}
 
-			if stdoutOnly {
-				data, _ := os.ReadFile(filepath.Join(r.RunDir, "stdout.log"))
-				content := string(data)
-				if tailN > 0 {
-					content = cmd.TailLog(content, tailN)
-				}
-				fmt.Print(content)
-				return nil
-			}
+			// 确定要查看的文件
+			logFile := filepath.Join(r.RunDir, "stdout.o")
 			if stderrOnly {
-				data, _ := os.ReadFile(filepath.Join(r.RunDir, "stderr.log"))
-				content := string(data)
-				if tailN > 0 {
-					content = cmd.TailLog(content, tailN)
-				}
-				fmt.Print(content)
-				return nil
+				logFile = filepath.Join(r.RunDir, "stderr.er")
 			}
 
-			// 默认显示 stdout
-			data, _ := os.ReadFile(filepath.Join(r.RunDir, "stdout.log"))
+			// follow 模式：实时跟踪文件变化
+			if follow {
+				return followLog(logFile, tailN)
+			}
+
+			// 普通模式：读取并显示
+			data, err := os.ReadFile(logFile)
+			if err != nil {
+				return fmt.Errorf("读取日志失败: %w", err)
+			}
 			content := string(data)
 			if tailN > 0 {
 				content = cmd.TailLog(content, tailN)
@@ -623,9 +659,62 @@ func logsCmd() *cobra.Command {
 	c.Flags().BoolVar(&stdoutOnly, "stdout", false, "只看 stdout")
 	c.Flags().BoolVar(&stderrOnly, "stderr", false, "只看 stderr")
 	c.Flags().IntVar(&tailN, "tail", 0, "最后 N 行")
-	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪")
+	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪 (类似 tail -f)")
 	c.Flags().BoolVar(&openEditor, "open", false, "用编辑器打开")
 	return c
+}
+
+// followLog 实时跟踪日志文件变化（类似 tail -f）
+func followLog(path string, tailN int) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("无法打开日志文件: %w", err)
+	}
+	defer f.Close()
+
+	// 如果指定了 tailN，先显示最后 N 行
+	if tailN > 0 {
+		data, _ := os.ReadFile(path)
+		content := string(data)
+		fmt.Print(cmd.TailLog(content, tailN))
+	}
+
+	// 跳到文件末尾
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %w", err)
+	}
+	_, err = f.Seek(info.Size(), 0)
+	if err != nil {
+		return fmt.Errorf("定位到文件末尾失败: %w", err)
+	}
+
+	// 定期检查新内容
+	buf := make([]byte, 4096)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		n, err := f.Read(buf)
+		if n > 0 {
+			os.Stdout.Write(buf[:n])
+		}
+		if err != nil {
+			// 文件可能被关闭或删除（运行结束）
+			break
+		}
+
+		// 检查文件是否被截断（新写入）
+		currentInfo, statErr := f.Stat()
+		if statErr == nil && currentInfo.Size() < info.Size() {
+			f.Seek(0, 0)
+			info = currentInfo
+		} else if statErr == nil {
+			info = currentInfo
+		}
+	}
+
+	return nil
 }
 
 // --- outputs ---

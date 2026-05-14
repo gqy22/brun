@@ -41,72 +41,95 @@ type ArtifactRow struct {
 
 func FormatRunList(runs []RunRow) string {
 	if len(runs) == 0 {
-		return "未找到运行记录。\n"
+		return Gray("未找到运行记录。\n")
 	}
 	var b strings.Builder
-	b.WriteString("RUN ID                   NAME            PROJECT        STATUS    DURATION   COMMAND\n")
-	b.WriteString("----                     ----            -------         ------    --------   -------\n")
+	b.WriteString(TableHeader("%-24s %-16s %-15s %-9s %-10s %s\n",
+		"RUN ID", "NAME", "PROJECT", "STATUS", "DURATION", "COMMAND"))
+	b.WriteString(Dim("----                     ----            -------         ------    --------   -------\n"))
 	for _, r := range runs {
 		name := r.Name
-		if len(name) > 15 {
-			name = name[:12] + "..."
+		if len(name) > 12 {
+			name = name[:9] + "..."
 		}
 		cmd := r.Command
-		if len(cmd) > 35 {
-			cmd = cmd[:32] + "..."
+		if len(cmd) > 32 {
+			cmd = cmd[:29] + "..."
 		}
-		fmt.Fprintf(&b, "%-24s %-16s %-15s %-9s %-10s %s\n", r.ID, name, r.Project, r.Status, r.Duration, cmd)
+		fmt.Fprintf(&b, "%s %s %s %s %s %s\n",
+			PadRight(r.ID, 24),
+			PadRight(name, 16),
+			PadRight(r.Project, 15),
+			PadRight(StatusColor(r.Status), 9),
+			PadRight(r.Duration, 10),
+			Dim(cmd))
 	}
 	return b.String()
 }
 
 func FormatShow(r *RunDetail) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Run ID:     %s\n", r.ID)
+	fmt.Fprintf(&b, "%s  %s\n", Bold("Run ID:"), r.ID)
 	if r.Name != "" {
-		fmt.Fprintf(&b, "Name:       %s\n", r.Name)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Name:"), r.Name)
 	}
-	fmt.Fprintf(&b, "Project:    %s\n", r.Project)
-	fmt.Fprintf(&b, "Status:     %s\n", r.Status)
-	fmt.Fprintf(&b, "Command:    %s\n", r.Command)
-	fmt.Fprintf(&b, "CWD:        %s\n", r.CWD)
+	fmt.Fprintf(&b, "%s  %s\n", Bold("Project:"), r.Project)
+	fmt.Fprintf(&b, "%s  %s\n", Bold("Status:"), StatusColor(r.Status))
+	fmt.Fprintf(&b, "%s  %s\n", Bold("Command:"), r.Command)
+	fmt.Fprintf(&b, "%s  %s\n", Bold("CWD:"), Dim(r.CWD))
 	if r.StartedAt != "" {
-		fmt.Fprintf(&b, "Started:    %s\n", r.StartedAt)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Started:"), r.StartedAt)
 	}
 	if r.EndedAt != "" {
-		fmt.Fprintf(&b, "Ended:      %s\n", r.EndedAt)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Ended:"), r.EndedAt)
 	}
 	if r.Duration != "" {
-		fmt.Fprintf(&b, "Duration:   %s\n", r.Duration)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Duration:"), r.Duration)
 	}
-	fmt.Fprintf(&b, "Exit Code:  %d\n", r.ExitCode)
+	fmt.Fprintf(&b, "%s  %d\n", Bold("Exit Code:"), r.ExitCode)
 	if r.GitRepo != "" {
-		fmt.Fprintf(&b, "Git Repo:   %s\n", r.GitRepo)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Git Repo:"), Dim(r.GitRepo))
 	}
 	if r.GitCommit != "" {
-		fmt.Fprintf(&b, "Git Commit: %s\n", r.GitCommit)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Git Commit:"), Dim(r.GitCommit[:min(8, len(r.GitCommit))]))
 	}
 	if len(r.Tags) > 0 {
-		fmt.Fprintf(&b, "Tags:       %s\n", strings.Join(r.Tags, ", "))
+		tags := make([]string, len(r.Tags))
+		for i, t := range r.Tags {
+			tags[i] = Cyan(t)
+		}
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Tags:"), strings.Join(tags, ", "))
 	}
 	if r.Note != "" {
-		fmt.Fprintf(&b, "Note:       %s\n", r.Note)
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Note:"), r.Note)
 	}
 	return b.String()
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func FormatOutputs(arts []ArtifactRow, runID, project string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Run ID: %s\n", runID)
-	fmt.Fprintf(&b, "Project: %s\n\n", project)
+	fmt.Fprintf(&b, "%s  %s\n", Bold("Run ID:"), runID)
+	fmt.Fprintf(&b, "%s  %s\n\n", Bold("Project:"), project)
 	if len(arts) == 0 {
-		b.WriteString("未找到输出文件。\n")
+		b.WriteString(Gray("未找到输出文件。\n"))
 		return b.String()
 	}
-	b.WriteString("KIND      STATUS     SIZE       PATH\n")
-	b.WriteString("----      ------     ----       ----\n")
+	b.WriteString(TableHeader("%-8s %-10s %-10s %s\n",
+		"KIND", "STATUS", "SIZE", "PATH"))
+	b.WriteString(Dim("----      ------     ----       ----\n"))
 	for _, a := range arts {
-		fmt.Fprintf(&b, "%-8s %-10s %-10s %s\n", a.Kind, a.Status, a.Size, a.Path)
+		fmt.Fprintf(&b, "%-8s %-10s %-10s %s\n",
+			KindColor(a.Kind),
+			StatusColor(a.Status),
+			a.Size,
+			a.Path)
 	}
 	return b.String()
 }
