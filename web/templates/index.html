@@ -56,12 +56,14 @@
 
   <script src="/static/app.js"></script>
   <script>
+    let autoRefreshTimer = null;
+
     document.addEventListener('DOMContentLoaded', () => {
       loadFilters();
       loadRuns();
-      // 自动刷新 running 任务
-      setInterval(loadRuns, 10000);
     });
+
+    async function loadRuns() {
 
     async function loadFilters() {
       const [projects, tags] = await Promise.all([
@@ -119,6 +121,15 @@
           <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-outline btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
         </tr>
       `).join('');
+
+      // 有 running 任务时才自动刷新
+      const hasRunning = runs.some(r => r.status === 'running');
+      if (hasRunning && !autoRefreshTimer) {
+        autoRefreshTimer = setInterval(loadRuns, 10000);
+      } else if (!hasRunning && autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
     }
 
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

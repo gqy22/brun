@@ -9,9 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/biotools/brun/internal"
 )
@@ -69,10 +70,13 @@ func (s *WebServer) ListenAndServe() error {
 			return fmt.Errorf("端口 %d-%d 均被占用，请手动指定 --port", s.port, p-1)
 		}
 		if attempt > 0 {
-			fmt.Printf("[web] 端口 %d 被占用，自动使用 %d\n", s.port, p)
+			internal.Log().Warn("web_port_in_use", "port", s.port, "using", p)
 		}
-		fmt.Printf("[web] brun dashboard: http://%s\n", addr)
+		internal.Log().Info("web_started", "addr", addr, "port", p)
 		s.printLANAddrs(p)
+
+		go s.healthCheckLoop(60 * time.Second)
+
 		srv := &http.Server{Handler: mux}
 		return srv.Serve(ln)
 	}
@@ -81,6 +85,7 @@ func (s *WebServer) ListenAndServe() error {
 // --- JSON API handlers ---
 
 func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
+	internal.Log().Info("api_request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 	project := r.URL.Query().Get("project")
 	status := r.URL.Query().Get("status")
 	tag := r.URL.Query().Get("tag")
@@ -255,6 +260,7 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	internal.Log().Info("api_kill", "run_id", id, "remote", r.RemoteAddr)
 	run, err := s.store.GetRun(id)
 	if err != nil {
 		httpError(w, err.Error(), 404)
@@ -300,6 +306,7 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	internal.Log().Info("api_delete", "run_id", id, "remote", r.RemoteAddr)
 	run, err := s.store.GetRun(id)
 	if err != nil {
 		httpError(w, err.Error(), 404)
@@ -434,6 +441,7 @@ func (s *WebServer) printLANAddrs(port int) {
 				continue
 			}
 			fmt.Printf("  [web] http://%s:%d  (%s)\n", ip.String(), port, name)
+			internal.Log().Info("web_lan_addr", "url", fmt.Sprintf("http://%s:%d", ip.String(), port), "iface", name)
 		}
 	}
 }
@@ -454,4 +462,55 @@ func isRandomIfaceName(name string) bool {
 		}
 	}
 	return true
+}
+
+// --- Health Check ---
+
+func (s *WebServer) healthCheckLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.checkRunningTasks()
+	}
+}
+
+func (s *WebServer) checkRunningTasks() {
+	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "")
+	if err != nil {
+		internal.Log().Error("health_check_query_failed", "error", err.Error())
+		return
+	}
+
+	if len(runs) == 0 {
+		return
+	}
+
+	internal.Log().Info("health_check", "running_count", len(runs))
+
+	for _, run := range runs {
+		pid, ok := s.readPID(run.RunDir)
+		if !ok {
+			s.store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+			internal.Log().Warn("health_check_zombie_no_pid", "run_id", run.ID)
+			continue
+		}
+
+		if err := syscall.Kill(pid, 0); err != nil {
+			s.store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+			internal.Log().Warn("health_check_zombie_process_dead", "run_id", run.ID, "pid", pid)
+		}
+	}
+}
+
+func (s *WebServer) readPID(runDir string) (int, bool) {
+	data, err := os.ReadFile(filepath.Join(runDir, ".pid"))
+	if err != nil {
+		return 0, false
+	}
+	var pid int
+	if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); n == 1 && pid > 0 {
+		return pid, true
+	}
+	return 0, false
 }

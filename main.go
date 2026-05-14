@@ -62,6 +62,10 @@ var commit string
 var buildDate string
 
 func main() {
+	if err := internal.InitLogger(); err != nil {
+		fmt.Fprintf(os.Stderr, "警告: 无法初始化日志: %v\n", err)
+	}
+
 	rootCmd := &cobra.Command{
 		Use:   "brun",
 		Short: "bio-runner: 面向生物信息学的运行记录与日志管理工具",
@@ -296,6 +300,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	fmt.Printf("Run started: %s\n", runID)
 	fmt.Printf("Project: %s\n", projName)
 	fmt.Printf("Logs: %s\n", runDir)
+	internal.Log().Info("run_started", "run_id", runID, "project", projName, "command", commandStr, "cwd", cwd)
 
 	// 8. 打开 DB，写入 running 记录
 	store, err := openStore()
@@ -424,6 +429,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 16. 打印摘要
 	fmt.Printf("\nCommand finished %s in %s\n", status, cmd.DurationString(result.DurationMs))
+	internal.Log().Info("run_finished", "run_id", runID, "status", status, "exit_code", result.ExitCode, "duration", cmd.DurationString(result.DurationMs))
 	if status == "failed" {
 		if errData, err := os.ReadFile(stderrPath); err == nil {
 			if lines := strings.Split(strings.TrimRight(string(errData), "\r\n"), "\n"); len(lines) > 0 {
@@ -526,6 +532,7 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 	fmt.Printf("[nohup] stdout: %s\n", stdoutPath)
 	fmt.Printf("[nohup] stderr: %s\n", stderrPath)
 	fmt.Printf("[nohup] 使用 'brun list' 查看运行状态\n")
+	internal.Log().Info("run_detached", "run_id", runID, "pid", cmd.Process.Pid, "command", strings.Join(args, " "))
 	return nil
 }
 
