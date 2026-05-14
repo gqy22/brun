@@ -37,34 +37,30 @@
         </div>
       </aside>
 
-      <!-- 右侧：日志 + 输出文件 -->
+      <!-- 右侧：统一标签页（Script / stdout / stderr）+ 输出文件 -->
       <div class="detail-main">
-        ${d.script ? `
-        <!-- 脚本运行快照 -->
-        <div class="section" id="script-section">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0">Script <span class="text-muted" style="font-weight:normal;font-size:12px">运行快照</span></h3>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制</button>
-              <button class="btn btn-sm btn-outline" onclick="toggleScript()"><span id="script-toggle-label">展开</span></button>
-            </div>
-          </div>
-          <pre id="script-content" style="max-height:0;overflow:hidden;font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;transition:max-height 0.3s">${esc(d.script)}</pre>
-        </div>` : ''}
-
-        <!-- 日志查看器 -->
+        <!-- 统一标签栏 -->
         <div class="log-viewer">
-          <div class="log-tabs">
-            <button class="log-tab active" data-stream="stdout" onclick="switchLog('stdout')">stdout</button>
-            <button class="log-tab" data-stream="stderr" onclick="switchLog('stderr')">stderr</button>
-            <div class="log-toolbar">
+          <div class="log-tabs" id="main-tabs">
+            <button class="log-tab" data-tab="script" onclick="switchMainTab('script')">Script</button>
+            <button class="log-tab active" data-tab="stdout" onclick="switchMainTab('stdout')">stdout</button>
+            <button class="log-tab" data-tab="stderr" onclick="switchMainTab('stderr')">stderr</button>
+            <div class="log-toolbar" id="log-toolbar">
               <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value="">
               <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px">
               <label class="checkbox-inline">
                 <input type="checkbox" id="auto-refresh" checked> auto-refresh
               </label>
             </div>
+            <div class="log-toolbar" id="script-toolbar" style="display:none">
+              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制脚本</button>
+            </div>
           </div>
+
+          <!-- Script 面板（默认隐藏） -->
+          <pre class="log-content" id="script-panel" style="display:none;font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all"></pre>
+
+          <!-- 日志面板 -->
           <pre class="log-content" id="log-content"></pre>
         </div>
 
@@ -86,13 +82,15 @@
   <script>
     const RUN_ID = window.location.pathname.split('/').pop();
     let currentStream = 'stdout';
+    let currentMainTab = 'stdout'; // 'script' | 'stdout' | 'stderr'
     let logOffset = 0;
     let logSource = null;
     let _logContent = '';
     let _renderedLines = 0;
     let _isFirstLogLoad = true;
-    let _escapedCache = '';     // 缓存已转义的全量内容
+    let _escapedCache = '';
     let durationTimer = null;
+    let _scriptContent = '';
 
     document.addEventListener('DOMContentLoaded', () => {
       loadDetail();
@@ -100,12 +98,48 @@
       document.getElementById('log-tail').addEventListener('change', () => loadLog());
     });
 
+    // ===== 统一标签页切换 =====
+
+    function switchMainTab(tab) {
+      currentMainTab = tab;
+
+      // 更新标签激活状态
+      document.querySelectorAll('#main-tabs .log-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+
+      var scriptPanel = document.getElementById('script-panel');
+      var logPanel = document.getElementById('log-content');
+      var scriptToolbar = document.getElementById('script-toolbar');
+      var logToolbar = document.getElementById('log-toolbar');
+
+      if (tab === 'script') {
+        scriptPanel.style.display = '';
+        logPanel.style.display = 'none';
+        scriptToolbar.style.display = '';
+        logToolbar.style.display = 'none';
+        disconnectSSE();
+      } else {
+        scriptPanel.style.display = 'none';
+        logPanel.style.display = '';
+        scriptToolbar.style.display = 'none';
+        logToolbar.style.display = '';
+        currentStream = tab;
+        disconnectSSE();
+        loadLog();
+        if (document.querySelector('.badge-running')) connectSSE();
+      }
+    }
+
     async function loadDetail() {
       const r = await fetch('/api/runs/' + RUN_ID);
       if (r.status === 404) { document.getElementById('info-panel').innerHTML = '<p class="text-danger">Run not found</p>'; return; }
       const d = await r.json();
 
       document.title = `${d.name || d.id} - brun`;
+
+      // 保存脚本内容
+      _scriptContent = d.script || '';
 
       const panel = document.getElementById('info-panel');
       panel.className = `sidebar-card status-${d.status}`;
@@ -180,6 +214,18 @@
         </div>` : ''}
       `;
 
+      // 渲染 Script 面板内容
+      renderScriptPanel();
+
+      // 有脚本时显示 Script 标签，否则隐藏
+      var scriptTab = document.querySelector('#main-tabs [data-tab="script"]');
+      if (scriptTab) {
+        scriptTab.style.display = _scriptContent ? '' : 'none';
+        if (!_scriptContent && currentMainTab === 'script') {
+          switchMainTab('stdout');
+        }
+      }
+
       if (d.command) document.getElementById('btn-rerun').style.display = '';
       if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
       if (d.status !== 'running') document.getElementById('btn-delete').style.display = '';
@@ -191,19 +237,23 @@
       if (d.status === 'running') connectSSE();
     }
 
+    function renderScriptPanel() {
+      var el = document.getElementById('script-panel');
+      if (!el) return;
+      if (_scriptContent) {
+        el.textContent = _scriptContent;
+        el.style.display = currentMainTab === 'script' ? '' : 'none';
+      } else {
+        el.textContent = '(无脚本快照)';
+        el.style.display = 'none';
+      }
+    }
+
     async function loadArtifacts() {
       const arts = await fetch('/api/runs/' + RUN_ID + '/artifacts').then(r => r.json());
       const tb = document.getElementById('arts-tbody');
       if (!arts.length) { tb.innerHTML = '<tr><td colspan="4" class="text-muted" style="padding:20px">无输出文件</td></tr>'; return; }
       tb.innerHTML = arts.map(a => `<tr><td>${esc(a.kind)}</td><td><span class="badge badge-${a.status}">${a.status}</span></td><td>${a.size}</td><td>${esc(a.path)}</td></tr>`).join('');
-    }
-
-    function switchLog(stream) {
-      currentStream = stream;
-      document.querySelectorAll('.log-tab').forEach(t => t.classList.toggle('active', t.dataset.stream === stream));
-      disconnectSSE();
-      loadLog();
-      if (document.querySelector('.badge-running')) connectSSE();
     }
 
     async function loadLog() {
@@ -224,7 +274,6 @@
       var q = document.getElementById('log-search').value;
 
       if (q) {
-        // 搜索模式：只对当前内容做转义+高亮（内容不会持续增长）
         var content = esc(_logContent);
         var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         content = content.replace(re, m => '<mark>' + m + '</mark>');
@@ -237,7 +286,6 @@
 
       if (!_logContent) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
 
-      // 增量转义：只对新增部分做 esc，拼接缓存
       var lines = _logContent.split('\n');
       if (_escapedCache === '' || _isFirstLogLoad || _renderedLines === 0 || lines.length < _renderedLines) {
         _isFirstLogLoad = false;
@@ -264,7 +312,6 @@
           el.innerHTML = _escapedCache;
         }
       } else {
-        // 增量 DOM 追加
         var newLines = lines.slice(_renderedLines - newLines.length, _renderedLines);
         if (newLines.length > 0) {
           var frag = document.createDocumentFragment();
@@ -297,7 +344,6 @@
         var ms = Date.now() - start;
         el.textContent = formatDuration(ms);
       }, 1000);
-      // 立即执行一次
       var ms = Date.now() - start;
       el.textContent = formatDuration(ms);
     }
@@ -318,7 +364,7 @@
       return h + 'h ' + min + 'm';
     }
 
-    // ===== 轻量级状态更新（SSE done 时调用，不重建整个面板） =====
+    // ===== 轻量级状态更新（SSE done 时调用） =====
 
     function updateRunStatus(d) {
       var panel = document.getElementById('info-panel');
@@ -326,24 +372,19 @@
 
       panel.className = 'sidebar-card status-' + (d.status || 'unknown');
 
-      // 更新 Status badge
       var badge = panel.querySelector('.badge');
       if (badge) { badge.className = 'badge badge-' + (d.status || 'unknown'); badge.textContent = d.status || ''; }
 
-      // 更新 Duration
       var durEl = document.getElementById('duration-value');
       if (durEl && d.duration) durEl.textContent = d.duration;
 
-      // 更新 Exit Code
       var exitEl = panel.querySelectorAll('.side-value');
       if (exitEl.length > 3 && d.exit_code !== undefined) exitEl[2].textContent = d.exit_code;
 
-      // 更新操作按钮
       document.getElementById('btn-kill').style.display = (d.status === 'running') ? '' : 'none';
       document.getElementById('btn-delete').style.display = (d.status === 'running') ? 'none' : '';
       document.getElementById('btn-rerun').style.display = d.command ? '' : 'none';
 
-      // 更新 Ended 时间
       var timeCells = panel.querySelectorAll('.side-value');
       for (var i = 0; i < timeCells.length; i++) {
         if (timeCells[i].textContent === '-' && d.ended_at) {
@@ -429,20 +470,10 @@
     }
 
     function copyScript() {
-      var el = document.getElementById('script-content');
-      if (!el) return;
-      navigator.clipboard.writeText(el.textContent).then(() => {
+      if (!_scriptContent) return;
+      navigator.clipboard.writeText(_scriptContent).then(() => {
         toast('success', '脚本已复制到剪贴板');
       }).catch(() => toast('error', '复制失败'));
-    }
-
-    function toggleScript() {
-      var el = document.getElementById('script-content');
-      var label = document.getElementById('script-toggle-label');
-      if (!el) return;
-      var isCollapsed = el.style.maxHeight === '0px' || el.style.maxHeight === '';
-      el.style.maxHeight = isCollapsed ? '500px' : '0px';
-      if (label) label.textContent = isCollapsed ? '收起' : '展开';
     }
 
     async function doDelete() {
@@ -454,7 +485,7 @@
       });
     }
 
-    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); }; }
+    function debounce(fn, ms) { var t; return function() { var a = arguments; clearTimeout(t); t = setTimeout(function() { fn.apply(this, a); }, ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
     function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }

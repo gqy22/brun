@@ -153,6 +153,11 @@
         return;
       }
 
+      // 首次加载数据时清除 "加载中..." 占位行
+      if (_prevRuns.length === 0 && tbody.querySelector('td.text-muted')) {
+        tbody.innerHTML = '';
+      }
+
       // 用 ID 做 index 快速查找
       var prevMap = {};
       _prevRuns.forEach(function(r) { prevMap[r.id] = r; });
@@ -394,7 +399,7 @@
       return s.substring(0, maxLen) + '...';
     }
 
-    function debounce(fn, ms) { let t; return (...a) { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); }; }
+    function debounce(fn, ms) { var t; return function() { var a = arguments; clearTimeout(t); t = setTimeout(function() { fn.apply(this, a); }, ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
   </script>
