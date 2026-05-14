@@ -46,10 +46,11 @@
           <th>Duration</th>
           <th>Command</th>
           <th>Started</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="runs-tbody">
-        <tr><td colspan="7" class="text-center text-muted">加载中...</td></tr>
+        <tr><td colspan="8" class="text-center text-muted">加载中...</td></tr>
       </tbody>
     </table>
   </main>
@@ -62,8 +63,6 @@
       loadFilters();
       loadRuns();
     });
-
-    async function loadRuns() {
 
     async function loadFilters() {
       const [projects, tags] = await Promise.all([
@@ -82,7 +81,6 @@
         opt.value = t; opt.textContent = t;
         tagSel.appendChild(opt);
       });
-      // 绑定过滤事件
       ['filter-project','filter-status','filter-tag','filter-search'].forEach(id => {
         document.getElementById(id).addEventListener('change', loadRuns);
         document.getElementById(id).addEventListener('input', debounce(loadRuns, 300));
@@ -90,45 +88,53 @@
     }
 
     async function loadRuns() {
-      const params = new URLSearchParams();
-      const fp = document.getElementById('filter-project').value;
-      const fs = document.getElementById('filter-status').value;
-      const ft = document.getElementById('filter-tag').value;
-      const fq = document.getElementById('filter-search').value;
-      if (fp) params.set('project', fp);
-      if (fs) params.set('status', fs);
-      if (ft) params.set('tag', ft);
-      if (fq) params.set('search', fq);
+      try {
+        const params = new URLSearchParams();
+        const fp = document.getElementById('filter-project').value;
+        const fs = document.getElementById('filter-status').value;
+        const ft = document.getElementById('filter-tag').value;
+        const fq = document.getElementById('filter-search').value;
+        if (fp) params.set('project', fp);
+        if (fs) params.set('status', fs);
+        if (ft) params.set('tag', ft);
+        if (fq) params.set('search', fq);
 
-      const resp = await fetch('/api/runs?' + params.toString());
-      const runs = await resp.json();
-      const tbody = document.getElementById('runs-tbody');
+        const resp = await fetch('/api/runs?' + params.toString());
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const runs = await resp.json();
+        const tbody = document.getElementById('runs-tbody');
 
-      if (runs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无运行记录</td></tr>';
-        return;
-      }
+        if (!Array.isArray(runs) || runs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">暂无运行记录</td></tr>';
+          if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+          return;
+        }
 
-      tbody.innerHTML = runs.map(r => `
-        <tr class="row-clickable" onclick="location.href='/run/${r.id}'">
-          <td><code class="run-id">${r.id}</code></td>
-          <td>${esc(r.name) || '-'}</td>
-          <td>${esc(r.project) || '-'}</td>
-          <td><span class="badge badge-${r.status}">${r.status}</span></td>
-          <td>${r.duration}</td>
-          <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
-          <td class="text-muted">${fmtTime(r.started_at)}</td>
-          <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-outline btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
-        </tr>
-      `).join('');
+        tbody.innerHTML = runs.map(r => `
+          <tr class="row-clickable" onclick="location.href='/run/${r.id}'">
+            <td><code class="run-id">${r.id}</code></td>
+            <td>${esc(r.name) || '-'}</td>
+            <td>${esc(r.project) || '-'}</td>
+            <td><span class="badge badge-${r.status}">${r.status}</span></td>
+            <td>${r.duration}</td>
+            <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
+            <td class="text-muted">${fmtTime(r.started_at)}</td>
+            <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-outline btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
+          </tr>
+        `).join('');
 
-      // 有 running 任务时才自动刷新
-      const hasRunning = runs.some(r => r.status === 'running');
-      if (hasRunning && !autoRefreshTimer) {
-        autoRefreshTimer = setInterval(loadRuns, 10000);
-      } else if (!hasRunning && autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
+        // 有 running 任务时才自动刷新
+        const hasRunning = runs.some(r => r.status === 'running');
+        if (hasRunning && !autoRefreshTimer) {
+          autoRefreshTimer = setInterval(loadRuns, 10000);
+        } else if (!hasRunning && autoRefreshTimer) {
+          clearInterval(autoRefreshTimer);
+          autoRefreshTimer = null;
+        }
+      } catch (err) {
+        console.error('loadRuns error:', err);
+        document.getElementById('runs-tbody').innerHTML =
+          '<tr><td colspan="8" class="text-center text-danger">加载失败: ' + esc(err.message) + '</td></tr>';
       }
     }
 
@@ -140,7 +146,7 @@
       const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
       const d = await r.json();
       if (d.ok) {
-        loadRuns(); // 刷新列表
+        loadRuns();
       } else {
         alert(d.error || '删除失败');
       }
