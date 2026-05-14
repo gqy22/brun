@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -644,19 +645,25 @@ func (s *WebServer) readPID(runDir string) (int, bool) {
 }
 
 // readInputScript 读取 run 目录下保存的输入脚本快照
+// 跳过二进制文件（含 NULL 字节）和超大文件（>2MB）
 func readInputScript(runDir string) string {
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
 		return ""
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "script.") {
-			data, err := os.ReadFile(filepath.Join(runDir, e.Name()))
-			if err != nil {
-				return ""
-			}
-			return string(data)
+		if !strings.HasPrefix(e.Name(), "script.") {
+			continue
 		}
+		data, err := os.ReadFile(filepath.Join(runDir, e.Name()))
+		if err != nil {
+			return ""
+		}
+		// 跳过二进制文件和过大文件
+		if len(data) > 2*1024*1024 || bytes.Contains(data, []byte{0}) {
+			return ""
+		}
+		return string(data)
 	}
 	return ""
 }

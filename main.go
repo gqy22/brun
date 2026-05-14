@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
@@ -292,8 +293,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 	// 6. 保存 command.sh + env.txt + 输入脚本快照
 	cmd.SaveCommandFile(runDir, commandStr)
 	cmd.SaveEnvFile(runDir)
-	if info, _ := os.Stat(args[0]); info != nil && !info.IsDir() {
-		cmd.SaveInputScript(runDir, args[0])
+	// 尝试从参数中找到实际的脚本文件（跳过解释器如 bash/python）
+	if scriptPath := findScriptArg(args); scriptPath != "" {
+		cmd.SaveInputScript(runDir, scriptPath)
 	}
 
 	// 7. 打印启动信息
@@ -1164,6 +1166,58 @@ func detectCWD(firstArg string) string {
 	}
 
 	return filepath.Dir(absPath)
+}
+
+// findScriptArg 从命令参数中查找实际的脚本文件
+// 跳过解释器（args[0] 如 bash/python），在后续参数中寻找文本脚本文件
+func findScriptArg(args []string) string {
+	if len(args) < 2 {
+		return ""
+	}
+
+	// 脚本文件扩展名白名单
+	scriptExts := map[string]bool{
+		".sh": true, ".bash": true, ".zsh": true,
+		".py": true, ".rb": true, ".pl": true,
+		".R": true, ".r": true, ".Rmd": true,
+		".js": true, ".ts": true,
+		".nf": true, ".smk": true,
+		".yaml": true, ".yml": true, ".json": true,
+		".toml": true, ".cfg": true, ".conf": true,
+	}
+
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		// 跳过选项参数（以 - 开头）
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		info, err := os.Stat(arg)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(arg)
+		if !scriptExts[ext] {
+			continue
+		}
+		// 验证是文本文件（非二进制）：检查前 512 字节不含 NULL 字节
+		if isTextFile(arg) {
+			return arg
+		}
+	}
+	return ""
+}
+
+// isTextFile 检查文件是否为文本文件（前 512 字节无 NULL 字节）
+func isTextFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	return n > 0 && !bytes.Contains(buf[:n], []byte{0})
 }
 
 func ageSince(startedAt string) string {

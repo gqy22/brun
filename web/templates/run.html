@@ -240,13 +240,25 @@
     function renderScriptPanel() {
       var el = document.getElementById('script-panel');
       if (!el) return;
-      if (_scriptContent) {
-        el.textContent = _scriptContent;
-        el.style.display = currentMainTab === 'script' ? '' : 'none';
-      } else {
+      if (!_scriptContent) {
         el.textContent = '(无脚本快照)';
         el.style.display = 'none';
+        return;
       }
+      // 检测二进制内容（含 NULL 字节或 ELF 魔数）
+      var isBinary = _scriptContent.indexOf('\x00') >= 0 || _scriptContent.indexOf('ELF') === 0;
+      if (isBinary) {
+        el.innerHTML = '<span class="text-muted">（脚本快照为二进制文件，' + _scriptContent.length.toLocaleString() + ' 字节，无法显示）</span>';
+        el.style.display = currentMainTab === 'script' ? '' : 'none';
+        return;
+      }
+      // 超过 500KB 时截断提示
+      if (_scriptContent.length > 512000) {
+        el.textContent = _scriptContent.substring(0, 512000) + '\n\n--- 文件过大（' + (_scriptContent.length / 1024).toFixed(0) + 'KB），已截断显示 ---';
+      } else {
+        el.textContent = _scriptContent;
+      }
+      el.style.display = currentMainTab === 'script' ? '' : 'none';
     }
 
     async function loadArtifacts() {
