@@ -23,7 +23,7 @@ var webTemplates embed.FS
 //go:embed web/static/*
 var webStatic embed.FS
 
-var version = "0.1.0"
+var version = "0.2.0"
 
 const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
 
