@@ -159,26 +159,26 @@ func runCmd() *cobra.Command {
 			Short:   "执行命令并记录运行信息 (默认 nohup 后台运行)",
 		Long:    "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
 		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
-  brun run -- python train.py --epochs 50
-  # 等效于: nohup python train.py --epochs 50 > ~/.local/share/brun/runs/<id>/stdout.o 2> ~/.local/share/brun/runs/<id>/stderr.er &
+  brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
+  # 等效于: nohup bwa mem ... > ~/.local/share/brun/runs/<id>/stdout.o 2> ~/.local/share/brun/runs/<id>/stderr.er &
 
   # 带项目名和标签
   brun run -p genome-align -t hg38,pep-align -- bwa mem ref.fa reads.fq > aligned.sam
 
-  # 前台运行（适合交互式调试）
+  # Snakemake 流程 (前台运行，方便调试)
   brun run -f -- snakemake -j 8
 
-  # 指定名称和备注
+  # FastQC 质控，指定名称和备注
   brun run -n "qc-report" --note "样本质量控制" -- fastqc *.fastq.gz
 
-  # 允许特定非零退出码
+  # samtools 允许特定非零退出码（如空区域）
   brun run --allow-exit 1,2 -- samtools view -b input.bam "chr1:1-1000"
 
-  # 在指定目录运行
+  # 在指定目录运行 R 脚本
   brun run --cwd /data/project -- Rscript analysis.R
 
-  # 设置超时
-  brun run --timeout 3600 -- python long_running_job.py`,
+  # 设置超时 (1 小时)
+  brun run --timeout 3600 -- hisat2 -x genome_idx -1 r1.fq -r2.fq`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if foreground {
 				return executeRun(args, name, project, note, tags,
