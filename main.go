@@ -140,7 +140,6 @@ func openStore() (*internal.Store, error) {
 	return internal.NewStore(filepath.Join(internal.HomeDir(), "db.sqlite"))
 }
 
-
 // --- init ---
 
 func initCmd() *cobra.Command {
@@ -150,7 +149,7 @@ func initCmd() *cobra.Command {
 		Short:   "在当前目录生成脚本模板",
 		Long:    "生成带标准注释头部的脚本模板。自动检测 conda 环境、计算编号（同名递增后缀）。",
 		Example: ex,
-		Args: cobra.MaximumNArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			name := "script"
 			if len(args) > 0 {
@@ -182,8 +181,6 @@ func initCmd() *cobra.Command {
 	}
 }
 
-
-
 // --- run (核心编排) ---
 
 func runCmd() *cobra.Command {
@@ -196,9 +193,9 @@ func runCmd() *cobra.Command {
 	var foreground bool
 
 	c := &cobra.Command{
-		Use:     "run -- <command...>",
-		Short:   "执行命令并记录运行信息 (默认 nohup 后台运行)",
-		Long:    "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
+		Use:   "run -- <command...>",
+		Short: "执行命令并记录运行信息 (默认 nohup 后台运行)",
+		Long:  "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
 		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
   brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
   # 等效于: nohup bwa mem ... > ~/.local/share/brun/runs/<id>/stdout.o 2> ~/.local/share/brun/runs/<id>/stderr.er &
@@ -664,7 +661,7 @@ func logsCmd() *cobra.Command {
 
   # 只看最后 50 行 stderr
   brun logs <run_id> --stderr --tail 50`,
-		Args:  cobra.MaximumNArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			arg := "latest"
 			if len(args) > 0 {
@@ -1115,7 +1112,7 @@ func webCmd() *cobra.Command {
 			}
 
 			srv := cmd.NewWebServer(store, addr, port, webTemplates, webStatic)
-				return srv.ListenAndServe()
+			return srv.ListenAndServe()
 		},
 	}
 	c.Flags().IntVarP(&port, "port", "p", 9213, "监听端口")

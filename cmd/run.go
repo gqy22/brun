@@ -166,11 +166,11 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	err := cmd.Start()
 	if err != nil {
 		return RunResult{
-			ExitCode:  1,
-			Status:    "failed",
+			ExitCode:   1,
+			Status:     "failed",
 			DurationMs: time.Since(start).Milliseconds(),
-			StartedAt: start.UTC().Format(time.RFC3339),
-			EndedAt:   time.Now().UTC().Format(time.RFC3339),
+			StartedAt:  start.UTC().Format(time.RFC3339),
+			EndedAt:    time.Now().UTC().Format(time.RFC3339),
 		}
 	}
 
@@ -220,8 +220,8 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		DurationMs: duration.Milliseconds(),
 		StartedAt:  start.UTC().Format(time.RFC3339),
 		EndedAt:    time.Now().UTC().Format(time.RFC3339),
-	PeakRSSKB:  pss,
-	CPUTimeMs:  cst,
+		PeakRSSKB:  pss,
+		CPUTimeMs:  cst,
 	}
 }
 

@@ -33,10 +33,10 @@ type Run struct {
 	Username   string
 	GitRepo    string
 	GitBranch  string
-	GitCommit   string
-	GitDirty    bool
-	PeakRSSKB   int64
-	CPUTimeMs   int64
+	GitCommit  string
+	GitDirty   bool
+	PeakRSSKB  int64
+	CPUTimeMs  int64
 }
 
 type Artifact struct {
@@ -185,7 +185,7 @@ func (s *Store) CreateRun(r *Run) error {
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
-			r.PeakRSSKB, r.CPUTimeMs,
+		r.PeakRSSKB, r.CPUTimeMs,
 		now, now,
 	)
 }
@@ -367,21 +367,27 @@ func b2i(b bool) int {
 
 func (s *Store) DeleteRun(id string) error {
 	tx, err := s.db.Begin()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 
 	// 按顺序删除子表记录（runs 表主键是 id，其余子表用 run_id）
 	if _, err := tx.Exec("DELETE FROM artifacts WHERE run_id=?", id); err != nil {
-		tx.Rollback(); return err
+		tx.Rollback()
+		return err
 	}
 	if _, err := tx.Exec("DELETE FROM tags WHERE run_id=?", id); err != nil {
-		tx.Rollback(); return err
+		tx.Rollback()
+		return err
 	}
 	if _, err := tx.Exec("DELETE FROM notes WHERE run_id=?", id); err != nil {
-		tx.Rollback(); return err
+		tx.Rollback()
+		return err
 	}
 	if _, err := tx.Exec("DELETE FROM runs WHERE id=?", id); err != nil {
-		tx.Rollback(); return err
+		tx.Rollback()
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
