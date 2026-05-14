@@ -358,13 +358,18 @@ func (s *Store) DeleteRun(id string) error {
 	if err != nil { return err }
 	defer tx.Rollback()
 
-	// 按顺序删除子表记录
-	tables := []string{"artifacts", "tags", "notes", "runs"}
-	for _, t := range tables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE run_id=?", t), id); err != nil {
-			tx.Rollback()
-			return err
-		}
+	// 按顺序删除子表记录（runs 表主键是 id，其余子表用 run_id）
+	if _, err := tx.Exec("DELETE FROM artifacts WHERE run_id=?", id); err != nil {
+		tx.Rollback(); return err
+	}
+	if _, err := tx.Exec("DELETE FROM tags WHERE run_id=?", id); err != nil {
+		tx.Rollback(); return err
+	}
+	if _, err := tx.Exec("DELETE FROM notes WHERE run_id=?", id); err != nil {
+		tx.Rollback(); return err
+	}
+	if _, err := tx.Exec("DELETE FROM runs WHERE id=?", id); err != nil {
+		tx.Rollback(); return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
