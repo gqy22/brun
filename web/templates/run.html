@@ -73,7 +73,11 @@
   <script>
     const RUN_ID = window.location.pathname.split('/').pop();
     let currentStream = 'stdout';
-    let refreshTimer = null;
+    let logOffset = 0;
+    let logSource = null;
+    let _logContent = '';
+    let _renderedLines = 0;
+    let _isFirstLogLoad = true;
 
     document.addEventListener('DOMContentLoaded', () => {
       loadDetail();
@@ -88,11 +92,9 @@
 
       document.title = `${d.name || d.id} - brun`;
 
-      // 左侧信息面板 — 紧凑分组
       const panel = document.getElementById('info-panel');
       panel.className = `sidebar-card status-${d.status}`;
       panel.innerHTML = `
-        <!-- 核心信息 -->
         <div class="side-info">
           <label>Run ID</label>
           <div class="side-value"><code>${esc(d.id)}</code></div>
@@ -163,14 +165,13 @@
         </div>` : ''}
       `;
 
-      // 操作按钮
       if (d.command) document.getElementById('btn-rerun').style.display = '';
       if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
       if (d.status !== 'running') document.getElementById('btn-delete').style.display = '';
 
       loadArtifacts();
       loadLog();
-      setupAutoRefresh(d.status === 'running');
+      if (d.status === 'running') connectSSE();
     }
 
     async function loadArtifacts() {
@@ -183,62 +184,120 @@
     function switchLog(stream) {
       currentStream = stream;
       document.querySelectorAll('.log-tab').forEach(t => t.classList.toggle('active', t.dataset.stream === stream));
+      disconnectSSE();
       loadLog();
+      if (document.querySelector('.badge-running')) connectSSE();
     }
 
     async function loadLog() {
+      disconnectSSE();
       const tail = document.getElementById('log-tail').value;
       const params = new URLSearchParams({ stream: currentStream });
       if (tail) params.set('tail', tail);
       const d = await fetch('/api/runs/' + RUN_ID + '/logs?' + params.toString()).then(r => r.json());
-      window._logContent = d.content || '';
-      window._isFirstLogLoad = true;
+      _logContent = d.content || '';
+      logOffset = d.size || 0;
+      _isFirstLogLoad = true;
+      _renderedLines = 0;
       renderLog();
     }
 
     function renderLog() {
-      let content = window._logContent || '';
       var el = document.getElementById('log-content');
       var q = document.getElementById('log-search').value;
+      var content = _logContent;
 
-      // 先转义防 XSS，再插入 mark 标签（顺序不能反）
       content = esc(content);
+
       if (q) {
-        const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         content = content.replace(re, m => '<mark>' + m + '</mark>');
-        // 有搜索时直接渲染，不打字机
+        el.className = 'log-content';
         el.innerHTML = content || '<span class="text-muted">(空)</span>';
+        _renderedLines = content.split('\n').length;
+        autoScroll(el);
         return;
       }
 
       if (!content) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
 
-      // 首次加载：打字机逐行效果（最多 100 行做动画，超出部分直接显示）
       var lines = content.split('\n');
-      var isTypewriter = window._isFirstLogLoad && lines.length > 0;
-      window._isFirstLogLoad = false;
 
-      if (isTypewriter && lines.length < 200) {
-        el.className = 'log-content typewriter';
-        el.innerHTML = lines.map(function(line, i) {
-          return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
-        }).join('');
+      if (_isFirstLogLoad || _renderedLines === 0) {
+        _isFirstLogLoad = false;
+        if (lines.length < 200) {
+          el.className = 'log-content typewriter';
+          el.innerHTML = lines.map(function(line, i) {
+            return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
+          }).join('');
+        } else {
+          el.className = 'log-content';
+          el.innerHTML = content;
+        }
+        _renderedLines = lines.length;
       } else {
-        el.className = 'log-content';
-        el.innerHTML = content;
+        var newLines = lines.slice(_renderedLines);
+        if (newLines.length > 0) {
+          var frag = document.createDocumentFragment();
+          newLines.forEach(function(line) {
+            var div = document.createElement('div');
+            div.className = 'log-line';
+            div.textContent = line || ' ';
+            frag.appendChild(div);
+          });
+          el.appendChild(frag);
+          _renderedLines = lines.length;
+        }
+      }
+
+      autoScroll(el);
+    }
+
+    function autoScroll(el) {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+        el.scrollTop = el.scrollHeight;
       }
     }
 
-    function setupAutoRefresh(isRunning) {
-      if (refreshTimer) clearInterval(refreshTimer);
-      if (isRunning && document.getElementById('auto-refresh').checked) {
-        refreshTimer = setInterval(loadLog, 3000);
+    // ===== SSE 实时流 =====
+
+    function connectSSE() {
+      disconnectSSE();
+      var url = '/api/runs/' + RUN_ID + '/logs/stream?stream=' + currentStream;
+      logSource = new EventSource(url);
+
+      logSource.onmessage = function(evt) {
+        var d = JSON.parse(evt.data);
+        if (d.done) {
+          disconnectSSE();
+          loadDetail();
+          return;
+        }
+        if (d.content) _logContent += d.content;
+        if (d.size) logOffset = d.size;
+        renderLog();
+      };
+
+      logSource.onerror = function() {
+        if (logSource && logSource.readyState !== EventSource.CONNECTING) {
+          disconnectSSE();
+        }
+      };
+    }
+
+    function disconnectSSE() {
+      if (logSource) {
+        logSource.close();
+        logSource = null;
       }
     }
 
     document.getElementById('auto-refresh')?.addEventListener('change', function() {
-      const isRunning = document.querySelector('.badge-running') !== null;
-      setupAutoRefresh(isRunning && this.checked);
+      if (this.checked && document.querySelector('.badge-running')) {
+        connectSSE();
+      } else {
+        disconnectSSE();
+      }
     });
 
     async function doRerun() {
@@ -266,7 +325,7 @@
     function copyCmd() {
       var cmd = '';
       var el = document.getElementById('cmd-text');
-      if (el) cmd = el.childNodes[0].textContent || ''; // 取纯文本，排除按钮
+      if (el) cmd = el.childNodes[0].textContent || '';
       navigator.clipboard.writeText(cmd).then(() => {
         toast('success', '命令已复制到剪贴板');
         var btn = el ? el.querySelector('.cmd-copy-btn') : null;
@@ -283,7 +342,7 @@
       });
     }
 
-    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
     function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }

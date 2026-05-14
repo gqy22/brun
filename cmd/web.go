@@ -47,6 +47,7 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("GET /api/runs", s.apiListRuns)
 	mux.HandleFunc("GET /api/runs/{id}", s.apiGetRun)
 	mux.HandleFunc("GET /api/runs/{id}/logs", s.apiGetLogs)
+	mux.HandleFunc("GET /api/runs/{id}/logs/stream", s.apiStreamLogs)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.apiGetArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/rerun", s.apiRerun)
 	mux.HandleFunc("POST /api/runs/{id}/kill", s.apiKill)
@@ -178,6 +179,7 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 		stream = "stdout"
 	}
 	tailN, _ := strconv.Atoi(r.URL.Query().Get("tail"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
 	var logPath string
 	switch stream {
@@ -193,6 +195,20 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fileSize := len(data)
+
+	if offset > 0 {
+		if offset >= fileSize {
+			jsonResponse(w, map[string]any{
+				"content": "",
+				"stream":  stream,
+				"size":    fileSize,
+			})
+			return
+		}
+		data = data[offset:]
+	}
+
 	content := string(data)
 	if tailN > 0 {
 		content = TailLog(content, tailN)
@@ -201,8 +217,89 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]any{
 		"content": content,
 		"stream":  stream,
-		"size":    len(data),
+		"size":    fileSize,
 	})
+}
+
+// apiStreamLogs SSE 日志流端点 — 实时推送日志增量
+func (s *WebServer) apiStreamLogs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := s.store.GetRun(id)
+	if err != nil {
+		httpError(w, err.Error(), 404)
+		return
+	}
+
+	stream := r.URL.Query().Get("stream")
+	if stream == "" {
+		stream = "stdout"
+	}
+
+	var logPath string
+	switch stream {
+	case "stderr":
+		logPath = filepath.Join(run.RunDir, "stderr.er")
+	default:
+		logPath = filepath.Join(run.RunDir, "stdout.o")
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httpError(w, "streaming not supported", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sendSSE := func(data map[string]any) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		data = []byte{}
+	}
+	prevSize := len(data)
+
+	sendSSE(map[string]any{
+		"content": string(data),
+		"size":    prevSize,
+	})
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			run, checkErr := s.store.GetRun(id)
+			if checkErr != nil {
+				return
+			}
+			if run.Status != "running" {
+				sendSSE(map[string]any{"done": true})
+				return
+			}
+
+			data, readErr = os.ReadFile(logPath)
+			if readErr != nil {
+				continue
+			}
+			if len(data) > prevSize {
+				sendSSE(map[string]any{
+					"content": string(data[prevSize:]),
+					"size":    len(data),
+				})
+				prevSize = len(data)
+			}
+		}
+	}
 }
 
 func (s *WebServer) apiGetArtifacts(w http.ResponseWriter, r *http.Request) {
