@@ -80,6 +80,38 @@ function toast(type, message, duration) {
   }, duration);
 }
 
+// Format duration in ms to human-readable string
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '-';
+  if (ms < 1000) return ms + 'ms';
+  var s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  var m = Math.floor(s / 60); var sec = s % 60;
+  if (m < 60) return m + 'm ' + sec + 's';
+  var h = Math.floor(m / 60); var min = m % 60;
+  return h + 'h ' + min + 'm';
+}
+
+// Format memory from KB
+function fmtMem(kb) {
+  if (!kb) return '-';
+  if (kb < 1024) return kb + ' KB';
+  return (kb / 1024).toFixed(1) + ' MB';
+}
+
+// Format CPU time from ms
+function fmtCPU(ms) {
+  if (!ms) return '-';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(2) + 's';
+}
+
+// Truncate string with ellipsis
+function truncate(s, maxLen) {
+  if (!s || s.length <= maxLen) return s || '';
+  return s.substring(0, maxLen) + '...';
+}
+
 // ===== Modal 对话框 =====
 function modalConfirm(title, bodyText, onConfirm) {
   var overlay = document.createElement('div');

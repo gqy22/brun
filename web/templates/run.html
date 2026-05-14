@@ -8,23 +8,19 @@
 </head>
 <body>
   <nav class="navbar">
-    <div class="nav-brand">
-      <a href="/">brun</a>
-    </div>
-    <div class="nav-links">
-      <a href="/">Dashboard</a>
-    </div>
+    <div class="nav-brand"><a href="/">brun</a></div>
+    <div class="nav-links"><a href="/">Dashboard</a></div>
   </nav>
 
-  <main class="container detail-page">
+  <main class="container detail-page" x-data="detailPage()" x-init="init()">
     <!-- 返回 + 操作栏 -->
     <div class="detail-header">
       <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
       <span class="detail-actions">
-        <button id="btn-kill" class="btn btn-sm btn-danger" style="display:none" onclick="doKill()">终止</button>
-        <button id="btn-rerun" class="btn btn-sm btn-primary" style="display:none" onclick="doRerun()">重跑</button>
-        <button id="btn-delete" class="btn btn-sm btn-outline" style="display:none" onclick="doDelete()">删除</button>
-        <button id="btn-copy-cmd" class="btn btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
+        <button x-show="detail.status==='running'" @click="doKill()" class="btn btn-sm btn-danger">终止</button>
+        <button x-show="detail.command" @click="doRerun()" class="btn btn-sm btn-primary">重跑</button>
+        <button x-show="detail.status!=='running'" @click="doDelete()" class="btn btn-sm btn-outline">删除</button>
+        <button @click="copyCmd()" class="btn btn-sm btn-outline">复制命令</button>
       </span>
     </div>
 
@@ -32,45 +28,148 @@
     <div class="detail-body">
       <!-- 左侧：基本信息 -->
       <aside class="detail-sidebar">
-        <div class="sidebar-card" id="info-panel">
-          <p class="text-muted">加载中...</p>
+        <div :class="'sidebar-card status-'+(detail.status||'unknown')">
+          <!-- 加载中 -->
+          <template x-if="!detail.id"><p class="text-muted">加载中...</p></template>
+
+          <template x-if="detail.id">
+            <div class="side-info">
+              <label>Run ID</label>
+              <div class="side-value"><code x-text="detail.id"></code></div>
+            </div>
+            <template x-if="detail.name">
+              <div class="side-info"><label>Name</label><div class="side-value" x-text="detail.name"></div></div>
+            </template>
+
+            <div class="side-group-title">执行状态</div>
+            <div class="side-info">
+              <label>Status</label>
+              <div class="side-value"><span :class="'badge badge-'+(detail.status||'unknown')" x-text="detail.status"></span></div>
+            </div>
+            <div class="side-info">
+              <label>Duration</label>
+              <div class="side-value"><strong id="duration-value" style="font-size:18px" x-text="displayDuration"></strong></div>
+            </div>
+            <div class="side-info">
+              <label>Exit Code</label>
+              <div class="side-value"><code x-text="detail.exit_code ?? '-'"></code></div>
+            </div>
+            <div class="side-info">
+              <label>Peak Memory</label>
+              <div class="side-value" x-text="fmtMem(detail.peak_rss_kb)"></div>
+            </div>
+            <div class="side-info">
+              <label>CPU Time</label>
+              <div class="side-value" x-text="fmtCPU(detail.cpu_time_ms)"></div>
+            </div>
+
+            <div class="side-group-title">命令与环境</div>
+            <div class="side-info">
+              <label>Command</label>
+              <div class="cmd-compact" id="cmd-text">
+                <span x-text="detail.command"></span>
+                <button class="cmd-copy-btn" @click="copyCmd()" title="复制命令">复制</button>
+              </div>
+            </div>
+            <div class="side-info">
+              <label>Project</label>
+              <div class="side-value"><span x-text="detail.project || '-'"></span></div>
+            </div>
+            <div class="side-info">
+              <label>CWD</label>
+              <div class="side-value" :title="detail.cwd"
+                   style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                   x-text="detail.cwd || '-'"></div>
+            </div>
+
+            <div class="side-group-title">时间信息</div>
+            <div class="side-info">
+              <label>Started</label>
+              <div class="side-value">
+                <span x-text="fmtTime(detail.started_at)"></span>
+                <span class="text-muted" style="margin-left:6px;font-size:12px" x-text="timeAgo(detail.started_at)"></span>
+              </div>
+            </div>
+            <div class="side-info">
+              <label>Ended</label>
+              <div class="side-value" x-text="fmtTime(detail.ended_at) || '-'"></div>
+            </div>
+
+            <template x-if="detail.git_commit">
+              <div class="side-group-title">版本信息</div>
+              <div class="side-info">
+                <label>Git</label>
+                <div class="side-value"><code x-text="detail.git_commit.substring(0,8)+(detail.git_dirty?' (dirty)':'')"></code></div>
+              </div>
+            </template>
+            <template x-if="detail.tags && detail.tags.length">
+              <div class="side-info">
+                <label>Tags</label>
+                <div class="side-value">
+                  <template x-for="t in detail.tags"><span class="tag" x-text="t"></span>&nbsp;</template>
+                </div>
+              </div>
+            </template>
+            <template x-if="detail.note">
+              <div class="side-info">
+                <label>Note</label>
+                <div class="side-value" x-text="detail.note"></div>
+              </div>
+            </template>
+          </template>
         </div>
       </aside>
 
-      <!-- 右侧：统一标签页（Script / stdout / stderr）+ 输出文件 -->
+      <!-- 右侧：统一标签页 -->
       <div class="detail-main">
-        <!-- 统一标签栏 -->
         <div class="log-viewer">
-          <div class="log-tabs" id="main-tabs">
-            <button class="log-tab" data-tab="script" onclick="switchMainTab('script')">Script</button>
-            <button class="log-tab active" data-tab="stdout" onclick="switchMainTab('stdout')">stdout</button>
-            <button class="log-tab" data-tab="stderr" onclick="switchMainTab('stderr')">stderr</button>
-            <div class="log-toolbar" id="log-toolbar">
-              <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value="">
-              <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px">
+          <div class="log-tabs">
+            <button x-show="scriptContent" :class="{active:tab==='script'}"
+                    @click="switchTab('script')" data-tab="script">Script</button>
+            <button :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
+            <button :class="{active:tab==='stderr'}" @click="switchTab('stderr')">stderr</button>
+            <div class="log-toolbar" x-show="tab!=='script'">
+              <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value=""
+                     @change="loadLog()">
+              <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px"
+                     @input.debounce.200ms="renderLog()">
               <label class="checkbox-inline">
-                <input type="checkbox" id="auto-refresh" checked> auto-refresh
+                <input type="checkbox" id="auto-refresh" checked @change="onAutoRefreshChange($event)"> auto-refresh
               </label>
             </div>
-            <div class="log-toolbar" id="script-toolbar" style="display:none">
-              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制脚本</button>
+            <div class="log-toolbar" x-show="tab==='script'">
+              <button class="btn btn-sm btn-outline" @click="copyScript()">复制脚本</button>
             </div>
           </div>
 
-          <!-- Script 面板（默认隐藏） -->
-          <pre class="log-content" id="script-panel" style="display:none;font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all"></pre>
+          <!-- Script 面板 -->
+          <pre x-show="tab==='script'" id="script-panel"
+               style="font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all"
+               x-text="scriptDisplayContent"></pre>
 
           <!-- 日志面板 -->
-          <pre class="log-content" id="log-content"></pre>
+          <pre class="log-content" id="log-content" x-show="tab!=='script'"></pre>
         </div>
 
         <!-- 输出文件 -->
         <div class="section">
           <h3>输出文件</h3>
           <div class="table-wrap">
-            <table class="table" id="arts-table">
+            <table class="table">
               <thead><tr><th>Type</th><th>Status</th><th>Size</th><th>Path</th></tr></thead>
-              <tbody id="arts-tbody"><tr><td colspan="4" class="text-muted">-</td></tr></tbody>
+              <tbody id="arts-tbody">
+                <template x-if="artifacts.length === 0">
+                  <tr><td colspan="4" class="text-muted" style="padding:20px">无输出文件</td></tr>
+                </template>
+                <template x-for="a in artifacts" :key="a.path">
+                  <tr>
+                    <td x-text="a.kind"></td>
+                    <td><span :class="'badge badge-'+a.status" x-text="a.status"></span></td>
+                    <td x-text="a.size"></td>
+                    <td x-text="a.path"></td>
+                  </tr>
+                </template>
+              </tbody>
             </table>
           </div>
         </div>
@@ -79,429 +178,284 @@
   </main>
 
   <script src="/static/app.js"></script>
+  <script src="/static/alpine.js" defer></script>
   <script>
-    const RUN_ID = window.location.pathname.split('/').pop();
-    let currentStream = 'stdout';
-    let currentMainTab = 'stdout'; // 'script' | 'stdout' | 'stderr'
-    let logOffset = 0;
-    let logSource = null;
-    let _logContent = '';
-    let _renderedLines = 0;
-    let _isFirstLogLoad = true;
-    let _escapedCache = '';
-    let durationTimer = null;
-    let _scriptContent = '';
+    function detailPage() {
+      var RUN_ID = window.location.pathname.split('/').pop();
+      return {
+        detail: {},
+        tab: 'stdout',
+        currentStream: 'stdout',
+        scriptContent: '',
+        artifacts: [],
+        // --- 日志状态 ---
+        logOffset: 0,
+        logSource: null,
+        _logContent: '',
+        _renderedLines: 0,
+        _isFirstLogLoad: true,
+        _escapedCache: '',
+        durationTimer: null,
+        displayDuration: '-',
 
-    document.addEventListener('DOMContentLoaded', () => {
-      loadDetail();
-      document.getElementById('log-search').addEventListener('input', debounce(renderLog, 200));
-      document.getElementById('log-tail').addEventListener('change', () => loadLog());
-    });
+        async init() {
+          await this.loadDetail();
+          document.getElementById('log-search').addEventListener('input', debounce(this.renderLog.bind(this), 200));
+          document.getElementById('log-tail').addEventListener('change', this.loadLog.bind(this));
+        },
 
-    // ===== 统一标签页切换 =====
+        switchTab(t) {
+          this.tab = t;
+          if (t === 'script') {
+            this.disconnectSSE();
+          } else {
+            this.currentStream = t;
+            this.disconnectSSE();
+            this.loadLog();
+            if (this.detail.status === 'running') this.connectSSE();
+          }
+        },
 
-    function switchMainTab(tab) {
-      currentMainTab = tab;
+        onAutoRefreshChange(e) {
+          if (e.target.checked && this.detail.status === 'running') {
+            this.connectSSE();
+          } else {
+            this.disconnectSSE();
+          }
+        },
 
-      // 更新标签激活状态
-      document.querySelectorAll('#main-tabs .log-tab').forEach(function(t) {
-        t.classList.toggle('active', t.dataset.tab === tab);
-      });
+        get scriptDisplayContent() {
+          if (!this.scriptContent) return '';
+          var isBinary = this.scriptContent.indexOf('\x00') >= 0 || this.scriptContent.indexOf('ELF') === 0;
+          if (isBinary) return '（脚本快照为二进制文件，' + this.scriptContent.length.toLocaleString() + ' 字节，无法显示）';
+          if (this.scriptContent.length > 512000) {
+            return this.scriptContent.substring(0, 512000) +
+              '\n\n--- 文件过大（' + (this.scriptContent.length / 1024).toFixed(0) + 'KB），已截断显示 ---';
+          }
+          return this.scriptContent;
+        },
 
-      var scriptPanel = document.getElementById('script-panel');
-      var logPanel = document.getElementById('log-content');
-      var scriptToolbar = document.getElementById('script-toolbar');
-      var logToolbar = document.getElementById('log-toolbar');
+        async loadDetail() {
+          try {
+            var r = await fetch('/api/runs/' + RUN_ID);
+            if (r.status === 404) { this.detail = { status: 'notfound' }; return; }
+            var d = await r.json();
+            document.title = (d.name || d.id) + ' - brun';
+            this.detail = d;
+            this.scriptContent = d.script || '';
+            await this.loadArtifacts();
+            this.loadLog();
+            this.stopDurationTimer();
+            if (d.status === 'running' && d.started_at) this.startDurationTimer(d.started_at);
+            if (d.status === 'running') this.connectSSE();
+          } catch (e) { console.error('loadDetail error:', e); }
+        },
 
-      if (tab === 'script') {
-        scriptPanel.style.display = '';
-        logPanel.style.display = 'none';
-        scriptToolbar.style.display = '';
-        logToolbar.style.display = 'none';
-        disconnectSSE();
-      } else {
-        scriptPanel.style.display = 'none';
-        logPanel.style.display = '';
-        scriptToolbar.style.display = 'none';
-        logToolbar.style.display = '';
-        currentStream = tab;
-        disconnectSSE();
-        loadLog();
-        if (document.querySelector('.badge-running')) connectSSE();
-      }
-    }
+        async loadArtifacts() {
+          try {
+            this.artifacts = await fetch('/api/runs/' + RUN_ID + '/artifacts').then(function(r) { return r.json(); });
+          } catch (e) { this.artifacts = []; }
+        },
 
-    async function loadDetail() {
-      const r = await fetch('/api/runs/' + RUN_ID);
-      if (r.status === 404) { document.getElementById('info-panel').innerHTML = '<p class="text-danger">Run not found</p>'; return; }
-      const d = await r.json();
+        async loadLog() {
+          this.disconnectSSE();
+          var tail = document.getElementById('log-tail').value;
+          var p = new URLSearchParams({ stream: this.currentStream });
+          if (tail) p.set('tail', tail);
+          var d = await fetch('/api/runs/' + RUN_ID + '/logs?' + p.toString()).then(function(r) { return r.json(); });
+          this._logContent = d.content || '';
+          this.logOffset = d.size || 0;
+          this._isFirstLogLoad = true;
+          this._renderedLines = 0;
+          this.renderLog();
+        },
 
-      document.title = `${d.name || d.id} - brun`;
+        renderLog() {
+          var el = document.getElementById('log-content');
+          var q = document.getElementById('log-search').value;
 
-      // 保存脚本内容
-      _scriptContent = d.script || '';
+          if (q) {
+            var content = esc(this._logContent);
+            var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            content = content.replace(re, function(m) { return '<mark>' + m + '</mark>'; });
+            el.className = 'log-content';
+            el.innerHTML = content || '<span class="text-muted">(空)</span>';
+            this._renderedLines = content.split('\n').length;
+            this.autoScroll(el);
+            return;
+          }
 
-      const panel = document.getElementById('info-panel');
-      panel.className = `sidebar-card status-${d.status}`;
-      panel.innerHTML = `
-        <div class="side-info">
-          <label>Run ID</label>
-          <div class="side-value"><code>${esc(d.id)}</code></div>
-        </div>
-        ${d.name ? `<div class="side-info"><label>Name</label><div class="side-value">${esc(d.name)}</div></div>` : ''}
+          if (!this._logContent) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
 
-        <div class="side-group-title">执行状态</div>
-        <div class="side-info">
-          <label>Status</label>
-          <div class="side-value"><span class="badge badge-${d.status}">${d.status}</span></div>
-        </div>
-        <div class="side-info">
-          <label>Duration</label>
-          <div class="side-value"><strong id="duration-value" style="font-size:18px">${d.duration || '-'}</strong></div>
-        </div>
-        <div class="side-info">
-          <label>Exit Code</label>
-          <div class="side-value"><code>${d.exit_code ?? '-'}</code></div>
-        </div>
-        <div class="side-info">
-          <label>Peak Memory</label>
-          <div class="side-value">${fmtMem(d.peak_rss_kb)}</div>
-        </div>
-        <div class="side-info">
-          <label>CPU Time</label>
-          <div class="side-value">${fmtCPU(d.cpu_time_ms)}</div>
-        </div>
+          var lines = this._logContent.split('\n');
+          if (this._escapedCache === '' || this._isFirstLogLoad || this._renderedLines === 0 || lines.length < this._renderedLines) {
+            this._isFirstLogLoad = false;
+            this._escapedCache = esc(this._logContent);
+            this._renderedLines = 0;
+          }
+          if (this._renderedLines < lines.length) {
+            var newLines = lines.slice(this._renderedLines);
+            var escapedNew = newLines.map(function(line) { return esc(line); });
+            this._escapedCache += escapedNew.join('\n') + (newLines.length > 0 ? '\n' : '');
+            this._renderedLines = lines.length;
+          }
 
-        <div class="side-group-title">命令与环境</div>
-        <div class="side-info">
-          <label>Command</label>
-          <div class="cmd-compact" id="cmd-text">${esc(d.command)}<button class="cmd-copy-btn" onclick="copyCmd()" title="复制命令">复制</button></div>
-        </div>
-        <div class="side-info">
-          <label>Project</label>
-          <div class="side-value">${esc(d.project) || '<span class=text-muted>-</span>'}</div>
-        </div>
-        <div class="side-info">
-          <label>CWD</label>
-          <div class="side-value" title="${esc(d.cwd)}" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.cwd)}</div>
-        </div>
+          if (this._isFirstLogLoad || el.innerHTML === '') {
+            this._isFirstLogLoad = false;
+            if (lines.length < 200) {
+              el.className = 'log-content typewriter';
+              var cachedLines = this._escapedCache.split('\n');
+              el.innerHTML = cachedLines.map(function(line, i) {
+                return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
+              }).join('');
+            } else {
+              el.className = 'log-content';
+              el.innerHTML = this._escapedCache;
+            }
+          } else {
+            var newLines = lines.slice(this._renderedLines - newLines.length, this._renderedLines);
+            if (newLines.length > 0) {
+              var frag = document.createDocumentFragment();
+              newLines.forEach(function(line) {
+                var div = document.createElement('div');
+                div.className = 'log-line';
+                div.textContent = line || ' ';
+                frag.appendChild(div);
+              });
+              el.appendChild(frag);
+            }
+          }
+          this.autoScroll(el);
+        },
 
-        <div class="side-group-title">时间信息</div>
-        <div class="side-info">
-          <label>Started</label>
-          <div class="side-value">${fmtTime(d.started_at)}<span class="text-muted" style="margin-left:6px;font-size:12px">${timeAgo(d.started_at)}</span></div>
-        </div>
-        <div class="side-info">
-          <label>Ended</label>
-          <div class="side-value">${fmtTime(d.ended_at) || '<span class=text-muted>-</span>'}</div>
-        </div>
+        autoScroll(el) {
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+            el.scrollTop = el.scrollHeight;
+          }
+        },
 
-        ${d.git_commit ? `
-        <div class="side-group-title">版本信息</div>
-        <div class="side-info">
-          <label>Git</label>
-          <div class="side-value"><code>${esc(d.git_commit.substring(0,8))}${d.git_dirty ? ' (dirty)' : ''}</code></div>
-        </div>` : ''}
-        ${d.tags?.length ? `
-        <div class="side-info">
-          <label>Tags</label>
-          <div class="side-value">${d.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div>
-        </div>` : ''}
-        ${d.note ? `
-        <div class="side-info">
-          <label>Note</label>
-          <div class="side-value">${esc(d.note)}</div>
-        </div>` : ''}
-      `;
+        startDurationTimer(startedAt) {
+          this.stopDurationTimer();
+          var self = this;
+          var start = new Date(startedAt).getTime();
+          var el = document.getElementById('duration-value');
+          this.durationTimer = setInterval(function () {
+            self.displayDuration = formatDuration(Date.now() - start);
+          }, 1000);
+          this.displayDuration = formatDuration(Date.now() - start);
+        },
 
-      // 渲染 Script 面板内容
-      renderScriptPanel();
+        stopDurationTimer() {
+          if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null; }
+        },
 
-      // 有脚本时显示 Script 标签，否则隐藏
-      var scriptTab = document.querySelector('#main-tabs [data-tab="script"]');
-      if (scriptTab) {
-        scriptTab.style.display = _scriptContent ? '' : 'none';
-        if (!_scriptContent && currentMainTab === 'script') {
-          switchMainTab('stdout');
-        }
-      }
+        updateRunStatus(d) {
+          if (!d.status) return;
+          this.detail = Object.assign({}, this.detail, { status: d.status });
+          if (d.duration) this.displayDuration = d.duration;
+          if (d.exit_code !== undefined) {
+            this.detail = Object.assign({}, this.detail, { exit_code: d.exit_code });
+          }
+          if (d.ended_at) {
+            this.detail = Object.assign({}, this.detail, { ended_at: d.ended_at });
+          }
+          this.stopDurationTimer();
+        },
 
-      if (d.command) document.getElementById('btn-rerun').style.display = '';
-      if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
-      if (d.status !== 'running') document.getElementById('btn-delete').style.display = '';
+        connectSSE() {
+          this.disconnectSSE();
+          var url = '/api/runs/' + RUN_ID + '/logs/stream?stream=' + this.currentStream;
+          var self = this;
+          this.logSource = new EventSource(url);
 
-      loadArtifacts();
-      loadLog();
-      stopDurationTimer();
-      if (d.status === 'running' && d.started_at) startDurationTimer(d.started_at);
-      if (d.status === 'running') connectSSE();
-    }
+          this.logSource.onmessage = function(evt) {
+            var d = JSON.parse(evt.data);
+            if (d.done) {
+              self.disconnectSSE();
+              self.updateRunStatus(d);
+              return;
+            }
+            if (d.content) self._logContent += d.content;
+            if (d.size) self.logOffset = d.size;
+            self.renderLog();
+          };
 
-    function renderScriptPanel() {
-      var el = document.getElementById('script-panel');
-      if (!el) return;
-      if (!_scriptContent) {
-        el.textContent = '(无脚本快照)';
-        el.style.display = 'none';
-        return;
-      }
-      // 检测二进制内容（含 NULL 字节或 ELF 魔数）
-      var isBinary = _scriptContent.indexOf('\x00') >= 0 || _scriptContent.indexOf('ELF') === 0;
-      if (isBinary) {
-        el.innerHTML = '<span class="text-muted">（脚本快照为二进制文件，' + _scriptContent.length.toLocaleString() + ' 字节，无法显示）</span>';
-        el.style.display = currentMainTab === 'script' ? '' : 'none';
-        return;
-      }
-      // 超过 500KB 时截断提示
-      if (_scriptContent.length > 512000) {
-        el.textContent = _scriptContent.substring(0, 512000) + '\n\n--- 文件过大（' + (_scriptContent.length / 1024).toFixed(0) + 'KB），已截断显示 ---';
-      } else {
-        el.textContent = _scriptContent;
-      }
-      el.style.display = currentMainTab === 'script' ? '' : 'none';
-    }
+          this.logSource.onerror = function() {
+            if (self.logSource && self.logSource.readyState !== EventSource.CONNECTING) {
+              self.disconnectSSE();
+            }
+          };
+        },
 
-    async function loadArtifacts() {
-      const arts = await fetch('/api/runs/' + RUN_ID + '/artifacts').then(r => r.json());
-      const tb = document.getElementById('arts-tbody');
-      if (!arts.length) { tb.innerHTML = '<tr><td colspan="4" class="text-muted" style="padding:20px">无输出文件</td></tr>'; return; }
-      tb.innerHTML = arts.map(a => `<tr><td>${esc(a.kind)}</td><td><span class="badge badge-${a.status}">${a.status}</span></td><td>${a.size}</td><td>${esc(a.path)}</td></tr>`).join('');
-    }
+        disconnectSSE() {
+          if (this.logSource) { this.logSource.close(); this.logSource = null; }
+        },
 
-    async function loadLog() {
-      disconnectSSE();
-      const tail = document.getElementById('log-tail').value;
-      const params = new URLSearchParams({ stream: currentStream });
-      if (tail) params.set('tail', tail);
-      const d = await fetch('/api/runs/' + RUN_ID + '/logs?' + params.toString()).then(r => r.json());
-      _logContent = d.content || '';
-      logOffset = d.size || 0;
-      _isFirstLogLoad = true;
-      _renderedLines = 0;
-      renderLog();
-    }
+        copyCmd() {
+          var cmd = this.detail.command || '';
+          navigator.clipboard.writeText(cmd).then(() => {
+            toast('success', '命令已复制到剪贴板');
+          }).catch(() => toast('error', '复制失败'));
+        },
 
-    function renderLog() {
-      var el = document.getElementById('log-content');
-      var q = document.getElementById('log-search').value;
+        copyScript() {
+          if (!this.scriptContent) return;
+          navigator.clipboard.writeText(this.scriptContent).then(() => {
+            toast('success', '脚本已复制到剪贴板');
+          }).catch(() => toast('error', '复制失败'));
+        },
 
-      if (q) {
-        var content = esc(_logContent);
-        var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        content = content.replace(re, m => '<mark>' + m + '</mark>');
-        el.className = 'log-content';
-        el.innerHTML = content || '<span class="text-muted">(空)</span>';
-        _renderedLines = content.split('\n').length;
-        autoScroll(el);
-        return;
-      }
-
-      if (!_logContent) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
-
-      var lines = _logContent.split('\n');
-      if (_escapedCache === '' || _isFirstLogLoad || _renderedLines === 0 || lines.length < _renderedLines) {
-        _isFirstLogLoad = false;
-        _escapedCache = esc(_logContent);
-        _renderedLines = 0;
-      }
-      if (_renderedLines < lines.length) {
-        var newLines = lines.slice(_renderedLines);
-        var escapedNew = newLines.map(function(line) { return esc(line); });
-        _escapedCache += escapedNew.join('\n') + (newLines.length > 0 ? '\n' : '');
-        _renderedLines = lines.length;
-      }
-
-      if (_isFirstLogLoad || el.innerHTML === '') {
-        _isFirstLogLoad = false;
-        if (lines.length < 200) {
-          el.className = 'log-content typewriter';
-          var cachedLines = _escapedCache.split('\n');
-          el.innerHTML = cachedLines.map(function(line, i) {
-            return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
-          }).join('');
-        } else {
-          el.className = 'log-content';
-          el.innerHTML = _escapedCache;
-        }
-      } else {
-        var newLines = lines.slice(_renderedLines - newLines.length, _renderedLines);
-        if (newLines.length > 0) {
-          var frag = document.createDocumentFragment();
-          newLines.forEach(function(line) {
-            var div = document.createElement('div');
-            div.className = 'log-line';
-            div.textContent = line || ' ';
-            frag.appendChild(div);
+        doRerun() {
+          var self = this;
+          modalConfirm('确认重跑', '将创建一个全新的任务记录并执行', async function() {
+            var r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
+            var d = await r.json();
+            if (d.ok && d.run_id) {
+              toast('success', '已创建新任务，正在跳转...');
+              setTimeout(function() { location.href = '/run/' + d.run_id; }, 600);
+            } else {
+              toast('error', d.error || '失败');
+            }
           });
-          el.appendChild(frag);
+        },
+
+        doKill() {
+          modalConfirm('确认终止', '确定要终止这个运行中的任务？', async () => {
+            var r = await fetch('/api/runs/' + RUN_ID + '/kill', { method: 'POST' });
+            var d = await r.json();
+            if (d.ok) { toast('success', '已终止 PID: ' + d.killed); setTimeout(function() { location.reload(); }, 1000); }
+            else toast('error', d.error || '终止失败');
+          });
+        },
+
+        doDelete() {
+          modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
+            var r = await fetch('/api/runs/' + RUN_ID, { method: 'DELETE' });
+            var d = await r.json();
+            if (d.ok) { toast('success', '已删除'); setTimeout(function() { location.href = '/'; }, 600); }
+            else toast('error', d.error || '删除失败');
+          });
         }
-      }
-
-      autoScroll(el);
+      };
     }
 
-    function autoScroll(el) {
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
-        el.scrollTop = el.scrollHeight;
-      }
+    function debounce(fn, ms) {
+      var t = null;
+      return function() { var a = arguments; clearTimeout(t); t = setTimeout(function() { fn.apply(this, a); }, ms); };
     }
-
-    // ===== Duration 实时计时器 =====
-
-    function startDurationTimer(startedAt) {
-      stopDurationTimer();
-      var start = new Date(startedAt).getTime();
-      var el = document.getElementById('duration-value');
-      durationTimer = setInterval(function () {
-        var ms = Date.now() - start;
-        el.textContent = formatDuration(ms);
-      }, 1000);
-      var ms = Date.now() - start;
-      el.textContent = formatDuration(ms);
-    }
-
-    function stopDurationTimer() {
-      if (durationTimer) { clearInterval(durationTimer); durationTimer = null; }
-    }
-
+    function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
+    function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }
+    function fmtCPU(ms) { if (!ms) return '-'; if (ms < 1000) return ms + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
     function formatDuration(ms) {
       if (ms < 1000) return ms + 'ms';
       var s = Math.floor(ms / 1000);
       if (s < 60) return s + 's';
-      var m = Math.floor(s / 60);
-      var sec = s % 60;
+      var m = Math.floor(s / 60); var sec = s % 60;
       if (m < 60) return m + 'm ' + sec + 's';
-      var h = Math.floor(m / 60);
-      var min = m % 60;
+      var h = Math.floor(m / 60); var min = m % 60;
       return h + 'h ' + min + 'm';
     }
-
-    // ===== 轻量级状态更新（SSE done 时调用） =====
-
-    function updateRunStatus(d) {
-      var panel = document.getElementById('info-panel');
-      if (!panel) return;
-
-      panel.className = 'sidebar-card status-' + (d.status || 'unknown');
-
-      var badge = panel.querySelector('.badge');
-      if (badge) { badge.className = 'badge badge-' + (d.status || 'unknown'); badge.textContent = d.status || ''; }
-
-      var durEl = document.getElementById('duration-value');
-      if (durEl && d.duration) durEl.textContent = d.duration;
-
-      var exitEl = panel.querySelectorAll('.side-value');
-      if (exitEl.length > 3 && d.exit_code !== undefined) exitEl[2].textContent = d.exit_code;
-
-      document.getElementById('btn-kill').style.display = (d.status === 'running') ? '' : 'none';
-      document.getElementById('btn-delete').style.display = (d.status === 'running') ? 'none' : '';
-      document.getElementById('btn-rerun').style.display = d.command ? '' : 'none';
-
-      var timeCells = panel.querySelectorAll('.side-value');
-      for (var i = 0; i < timeCells.length; i++) {
-        if (timeCells[i].textContent === '-' && d.ended_at) {
-          timeCells[i].innerHTML = fmtTime(d.ended_at);
-          break;
-        }
-      }
-    }
-
-    // ===== SSE 实时流 =====
-
-    function connectSSE() {
-      disconnectSSE();
-      var url = '/api/runs/' + RUN_ID + '/logs/stream?stream=' + currentStream;
-      logSource = new EventSource(url);
-
-      logSource.onmessage = function(evt) {
-        var d = JSON.parse(evt.data);
-        if (d.done) {
-          disconnectSSE();
-          stopDurationTimer();
-          updateRunStatus(d);
-          return;
-        }
-        if (d.content) _logContent += d.content;
-        if (d.size) logOffset = d.size;
-        renderLog();
-      };
-
-      logSource.onerror = function() {
-        if (logSource && logSource.readyState !== EventSource.CONNECTING) {
-          disconnectSSE();
-        }
-      };
-    }
-
-    function disconnectSSE() {
-      if (logSource) {
-        logSource.close();
-        logSource = null;
-      }
-    }
-
-    document.getElementById('auto-refresh')?.addEventListener('change', function() {
-      if (this.checked && document.querySelector('.badge-running')) {
-        connectSSE();
-      } else {
-        disconnectSSE();
-      }
-    });
-
-    async function doRerun() {
-      modalConfirm('确认重跑', '将创建一个全新的任务记录并执行', async () => {
-        const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
-        const d = await r.json();
-        if (d.ok && d.run_id) {
-          toast('success', '已创建新任务，正在跳转...');
-          setTimeout(() => location.href = '/run/' + d.run_id, 600);
-        } else {
-          toast('error', d.error || '失败');
-        }
-      });
-    }
-
-    async function doKill() {
-      modalConfirm('确认终止', '确定要终止这个运行中的任务？', async () => {
-        const r = await fetch('/api/runs/' + RUN_ID + '/kill', { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) { toast('success', `已终止 PID: ${d.killed}`); setTimeout(() => location.reload(), 1000); }
-        else toast('error', d.error || '终止失败');
-      });
-    }
-
-    function copyCmd() {
-      var cmd = '';
-      var el = document.getElementById('cmd-text');
-      if (el) cmd = el.childNodes[0].textContent || '';
-      navigator.clipboard.writeText(cmd).then(() => {
-        toast('success', '命令已复制到剪贴板');
-        var btn = el ? el.querySelector('.cmd-copy-btn') : null;
-        if (btn) { var orig = btn.textContent; btn.textContent = '已复制!'; setTimeout(() => btn.textContent = orig, 1200); }
-      }).catch(() => toast('error', '复制失败'));
-    }
-
-    function copyScript() {
-      if (!_scriptContent) return;
-      navigator.clipboard.writeText(_scriptContent).then(() => {
-        toast('success', '脚本已复制到剪贴板');
-      }).catch(() => toast('error', '复制失败'));
-    }
-
-    async function doDelete() {
-      modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
-        const r = await fetch('/api/runs/' + RUN_ID, { method: 'DELETE' });
-        const d = await r.json();
-        if (d.ok) { toast('success', '已删除'); setTimeout(() => location.href = '/', 600); }
-        else toast('error', d.error || '删除失败');
-      });
-    }
-
-    function debounce(fn, ms) { var t; return function() { var a = arguments; clearTimeout(t); t = setTimeout(function() { fn.apply(this, a); }, ms); }; }
-    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-    function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
-    function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }
-    function fmtCPU(ms) { if (!ms) return '-'; if (ms < 1000) return ms + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
   </script>
 </body>
 </html>
