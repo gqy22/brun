@@ -85,7 +85,7 @@
         <div class="info-item"><label>Project</label>${esc(d.project) || '-'}</div>
         <div class="info-item"><label>Status</label><span class="badge badge-${d.status}">${d.status}</span></div>
         <div class="info-item"><label>Command</label><code class="cmd-full" id="cmd-text">${esc(d.command)}</code></div>
-        <div class="info-item"><label>CWD</label><code>${esc(d.cwd)}</code></div>
+        <div class="info-item"><label>CWD</label><code class="cwd-path">${esc(d.cwd)}</code></div>
         <div class="info-item"><label>Started</label>${fmtTime(d.started_at)}</div>
         <div class="info-item"><label>Ended</label>${fmtTime(d.ended_at) || '-'}</div>
         <div class="info-item"><label>Duration</label>${d.duration || '-'}</div>
