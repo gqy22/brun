@@ -110,6 +110,43 @@ brun rerun latest --dry-run        # 先看看会执行什么
 brun rerun latest                  # 确认后真正复跑
 ```
 
+## Web Dashboard
+
+启动后浏览器访问即可使用完整可视化管理界面：
+
+```bash
+brun web                    # 默认端口 9313
+brun web --port 8080        # 自定义端口
+```
+
+功能概览：
+
+- **Dashboard 首页**：所有运行记录表格视图，支持按项目/状态/标签/关键词过滤，底部统计总运行数/成功率/今日运行数，running 任务自动刷新
+- **任务详情页**：左右分栏布局 — 左侧信息面板（状态/耗时/资源消耗/命令/Git/时间），右侧终端风格日志查看器（stdout/stderr 切换、搜索高亮、tail 截断、auto-refresh）+ 输出文件列表
+- **操作按钮**：终止运行中任务、删除已完成记录、重跑（生成全新 Run 记录）、复制命令
+- **资源监控**：每个任务自动记录峰值内存（Peak RSS）和 CPU 累计时间，详情页直接展示
+- **移动端适配**：小屏幕自动切换为卡片列表视图
+- **局域网访问**：启动时自动打印所有可用 IP 地址，同局域网任意设备可访问
+
+```bash
+# 启动后浏览器打开
+open http://localhost:9313
+
+# 或从其他设备访问（手机/平板查看运行状态）
+http://192.168.1.x:9313
+```
+
+### 资源监控
+
+每个任务执行完毕后自动采集资源数据：
+
+| 指标 | 来源 | 说明 |
+|------|------|------|
+| Peak Memory | `/proc/{pid}/status` VmHWM | 进程生命周期峰值物理内存 |
+| CPU Time | `/proc/{pid}/stat` utime+stime | 用户态+内核态累计 CPU 时间 |
+
+数据在任务结束时一次性读取，零性能开销。Web 详情页左侧面板直接展示。
+
 ## 命令一览
 
 | 命令 | 说明 | 常用示例 |
@@ -123,6 +160,7 @@ brun rerun latest                  # 确认后真正复跑
 | `brun tag <id> TAG...` | 添加标签 | `brun tag latest sample:S1 production` |
 | `brun note <id> "text"` | 添加备注 | `brun note latest "参数说明"` |
 | `brun rerun <id\|latest>` | 重新运行 | `brun rerun latest --dry-run` |
+| `brun web` | 启动 Web Dashboard | `brun web --port 8080` |
 | `brun init` | 生成 brun.yaml | `brun init my-proj` |
 | `brun clean` | 清理旧记录 | `brun clean --dry-run` |
 
@@ -255,6 +293,9 @@ make release-all
 - **YAML** 配置解析
 - **WAL 模式 + 指数退避重试** 支持并发写入
 - **内置 nohup** 通过进程分离实现默认后台运行
+- **Web Dashboard**: Go `net/http` + `embed.FS` 内嵌模板/静态资源，零外部依赖
+- **前端**: 原生 HTML/CSS/JS（无框架），DM Sans 字体 + 终端风格日志查看器
+- **资源采集**: Linux `/proc/{pid}/` 文件系统读取 VmHWM / utime+stime
 
 ## License
 
