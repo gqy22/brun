@@ -139,7 +139,8 @@ body {
   padding: 28px;
   flex: 1;
 }
-/* 详情页：撑满宽度，减少侧边留白 */
+/* Dashboard & 详情页：撑满宽度 */
+.container.dashboard-page,
 .container.detail-page {
   max-width: none;
   padding: 16px 24px;
@@ -223,6 +224,10 @@ body {
   text-transform: uppercase;
   letter-spacing: .6px;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: linear-gradient(to bottom, #fafbfc, #f5f7fa);
 }
 .table td {
   padding: 14px 18px;
@@ -764,13 +769,166 @@ code {
   to   { opacity: 0; transform: scale(.95) translateY(10px); }
 }
 
+/* ===== Empty State ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 24px;
+  text-align: center;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--bg-alt);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: var(--text-dim);
+}
+.empty-icon svg { width: 28px; height: 28px; }
+.empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.empty-desc {
+  font-size: 14px;
+  color: var(--text-muted);
+  max-width: 300px;
+}
+
+/* ===== 刷新按钮旋转动画 ===== */
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn-spinning svg { animation: spin .6s linear infinite; }
+
+/* ===== 过滤栏 Icon 前缀 ===== */
+.filter-bar select,
+.filter-bar .filter-input {
+  padding-left: 34px !important;
+  background-size: 16px !important;
+  background-position: 10px center !important;
+  background-repeat: no-repeat !important;
+}
+.filter-bar #filter-project { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z'/%3E%3C/svg%3E"); }
+.filter-bar #filter-status { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E"); }
+.filter-bar #filter-tag { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E"); }
+.filter-bar #filter-search { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E"); }
+
+/* 刷新按钮图标 */
+.btn-refresh-icon { transition: transform .5s ease; }
+
+/* ===== Footer 统计 ===== */
+.footer-stats {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.footer-stat {
+  text-align: center;
+}
+.footer-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.footer-stat-label {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-top: 2px;
+}
+
+/* ===== 日志打字机效果 ===== */
+.log-content.typewriter .log-line {
+  opacity: 0;
+  animation: typeLine .25s var(--ease-out) forwards;
+}
+
+@keyframes typeLine {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ===== 移动端卡片视图 ===== */
+.run-card-list { display: none; }
+@media (max-width: 768px) {
+  .table-wrap table { display: none; }
+  .run-card-list { display: block; }
+  .run-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .run-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+  .run-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .run-card-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--code-bg);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .run-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .run-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13.5px;
+  }
+  .run-card-row .label { color: var(--text-dim); font-size: 12px; }
+  .run-card-row .value { font-weight: 500; }
+  .run-card-cmd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 4px;
+  }
+  .run-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-light);
+  }
+  .run-card-time { font-size: 12px; color: var(--text-dim); }
+}
+
 /* ===== Utility ===== */
 .text-center { text-align: center; }
 .text-muted { color: var(--text-muted) !important; }
 .text-danger { color: var(--danger) !important; }
 .footer {
   text-align: center;
-  padding: 24px;
+  padding: 20px 24px;
   color: var(--text-dim);
   font-size: 12.5px;
   border-top: 1px solid var(--border-light);

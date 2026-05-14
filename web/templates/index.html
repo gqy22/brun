@@ -16,7 +16,7 @@
     </div>
   </nav>
 
-  <main class="container">
+  <main class="container dashboard-page">
     <!-- 过滤栏 -->
     <div class="filter-bar">
       <select id="filter-project" title="项目过滤">
@@ -32,11 +32,14 @@
         <option value="">所有标签</option>
       </select>
       <input type="text" id="filter-search" placeholder="搜索命令..." class="filter-input">
-      <button onclick="loadRuns()" class="btn btn-sm btn-outline" id="btn-refresh">刷新</button>
+      <button onclick="doRefresh()" class="btn btn-sm btn-outline" id="btn-refresh">
+        <svg class="btn-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        刷新
+      </button>
     </div>
 
-    <!-- 运行列表 -->
-    <div class="table-wrap">
+    <!-- 桌面端：表格 -->
+    <div class="table-wrap" id="table-wrap">
       <table class="table" id="runs-table">
         <thead>
           <tr>
@@ -55,7 +58,14 @@
         </tbody>
       </table>
     </div>
+
+    <!-- 移动端：卡片列表 -->
+    <div class="run-card-list" id="run-card-list"></div>
   </main>
+
+  <footer class="footer" id="footer-stats">
+    <p>brun &mdash; bio-runner &copy; 2026</p>
+  </footer>
 
   <script src="/static/app.js"></script>
   <script>
@@ -64,6 +74,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       loadFilters();
       loadRuns();
+      loadFooterStats();
     });
 
     async function loadFilters() {
@@ -78,6 +89,15 @@
       ['filter-project','filter-status','filter-tag','filter-search'].forEach(id => {
         document.getElementById(id).addEventListener('change', loadRuns);
         document.getElementById(id).addEventListener('input', debounce(loadRuns, 300));
+      });
+    }
+
+    function doRefresh() {
+      var btn = document.getElementById('btn-refresh');
+      var icon = btn.querySelector('.btn-refresh-icon');
+      if (icon) icon.classList.add('btn-spinning');
+      loadRuns().then(function() {
+        if (icon) setTimeout(function() { icon.classList.remove('btn-spinning'); }, 400);
       });
     }
 
@@ -97,13 +117,18 @@
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const runs = await resp.json();
         const tbody = document.getElementById('runs-tbody');
+        const cardList = document.getElementById('run-card-list');
 
         if (!Array.isArray(runs) || runs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:48px 0">暂无运行记录</td></tr>';
+          // 空状态 — 表格和卡片都显示
+          var emptyHtml = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div><div class="empty-title">暂无运行记录</div><div class="empty-desc">运行你的第一个任务，这里会显示执行结果</div></div></td></tr>';
+          tbody.innerHTML = emptyHtml;
+          cardList.innerHTML = '';
           if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
           return;
         }
 
+        // 桌面端表格
         tbody.innerHTML = runs.map((r, i) => `
           <tr class="row-clickable animate-in" style="animation-delay: ${i * 35}ms" onclick="location.href='/run/${r.id}'">
             <td><code class="run-id">${esc(r.id)}</code></td>
@@ -115,6 +140,26 @@
             <td class="text-muted" style="font-size:13px">${fmtTime(r.started_at)}</td>
             <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
           </tr>
+        `).join('');
+
+        // 移动端卡片
+        cardList.innerHTML = runs.map(r => `
+          <div class="run-card animate-in" onclick="location.href='/run/${r.id}'">
+            <div class="run-card-header">
+              <span class="run-card-id">${esc(r.id)}</span>
+              <span class="badge badge-${r.status}">${r.status}</span>
+            </div>
+            <div class="run-card-body">
+              ${r.name ? `<div class="run-card-row"><span class="label">Name</span><span class="value">${esc(r.name)}</span></div>` : ''}
+              <div class="run-card-row"><span class="label">Project</span><span class="value">${esc(r.project) || '-'}</span></div>
+              <div class="run-card-row"><span class="label">Duration</span><span class="value">${r.duration || '-'}</span></div>
+              <div class="run-card-cmd" title="${esc(r.command)}">${esc(r.command)}</div>
+            </div>
+            <div class="run-card-footer">
+              <span class="run-card-time">${fmtTime(r.started_at)}</span>
+              <button class="btn btn-sm btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除">删除</button>
+            </div>
+          </div>
         `).join('');
 
         // 有 running 任务时才自动刷新
@@ -132,11 +177,30 @@
       }
     }
 
+    async function loadFooterStats() {
+      try {
+        const runs = await fetch('/api/runs').then(r => r.json());
+        if (!Array.isArray(runs)) return;
+        var total = runs.length;
+        var success = runs.filter(r => r.status === 'success').length;
+        var rate = total > 0 ? Math.round(success / total * 100) : 0;
+        var today = new Date().toISOString().slice(0,10);
+        var todayCount = runs.filter(r => r.started_at && r.started_at.startsWith(today)).length;
+
+        document.getElementById('footer-stats').innerHTML =
+          '<div class="footer-stats">' +
+            '<div class="footer-stat"><div class="footer-stat-value">' + total + '</div><div class="footer-stat-label">总运行</div></div>' +
+            '<div class="footer-stat"><div class="footer-stat-value">' + rate + '%</div><div class="footer-stat-label">成功率</div></div>' +
+            '<div class="footer-stat"><div class="footer-stat-value">' + todayCount + '</div><div class="footer-stat-label">今日运行</div></div>' +
+          '</div>';
+      } catch(e) { /* 静默失败 */ }
+    }
+
     async function deleteRun(id, e) {
       modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
         const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
         const d = await r.json();
-        if (d.ok) { toast('success', '已删除'); loadRuns(); }
+        if (d.ok) { toast('success', '已删除'); loadRuns(); loadFooterStats(); }
         else toast('error', d.error || '删除失败');
       });
     }
