@@ -41,7 +41,7 @@ type ArtifactRow struct {
 
 func FormatRunList(runs []RunRow) string {
 	if len(runs) == 0 {
-		return "No runs found.\n"
+		return "未找到运行记录。\n"
 	}
 	var b strings.Builder
 	b.WriteString("RUN ID                   NAME            PROJECT        STATUS    DURATION   COMMAND\n")
@@ -100,7 +100,7 @@ func FormatOutputs(arts []ArtifactRow, runID, project string) string {
 	fmt.Fprintf(&b, "Run ID: %s\n", runID)
 	fmt.Fprintf(&b, "Project: %s\n\n", project)
 	if len(arts) == 0 {
-		b.WriteString("No outputs found.\n")
+		b.WriteString("未找到输出文件。\n")
 		return b.String()
 	}
 	b.WriteString("KIND      STATUS     SIZE       PATH\n")

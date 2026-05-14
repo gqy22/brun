@@ -296,7 +296,9 @@ func (s *Store) GetTags(runID string) ([]string, error) {
 
 func (s *Store) AddNote(runID, note string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	s.retryExec(`DELETE FROM notes WHERE run_id=?`, runID)
+	if err := s.retryExec(`DELETE FROM notes WHERE run_id=?`, runID); err != nil {
+		return fmt.Errorf("delete old note: %w", err)
+	}
 	return s.retryExec(`INSERT INTO notes (run_id,note,created_at) VALUES(?,?,?)`, runID, note, now)
 }
 

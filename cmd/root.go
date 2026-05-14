@@ -54,7 +54,7 @@ func WriteInitFile(dir, project string) error {
 func FormatCleanSummary(items []CleanItem, dryRun bool) string {
 	var b strings.Builder
 	if len(items) == 0 {
-		return "Nothing to clean.\n"
+		return "无需清理。\n"
 	}
 	prefix := "Will remove"
 	if dryRun {
