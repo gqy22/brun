@@ -184,19 +184,41 @@
       if (tail) params.set('tail', tail);
       const d = await fetch('/api/runs/' + RUN_ID + '/logs?' + params.toString()).then(r => r.json());
       window._logContent = d.content || '';
+      window._isFirstLogLoad = true;
       renderLog();
     }
 
     function renderLog() {
       let content = window._logContent || '';
+      var el = document.getElementById('log-content');
+      var q = document.getElementById('log-search').value;
+
       // 先转义防 XSS，再插入 mark 标签（顺序不能反）
       content = esc(content);
-      const q = document.getElementById('log-search').value;
       if (q) {
         const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         content = content.replace(re, m => '<mark>' + m + '</mark>');
+        // 有搜索时直接渲染，不打字机
+        el.innerHTML = content || '<span class="text-muted">(空)</span>';
+        return;
       }
-      document.getElementById('log-content').innerHTML = content || '<span class="text-muted">(空)</span>';
+
+      if (!content) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
+
+      // 首次加载：打字机逐行效果（最多 100 行做动画，超出部分直接显示）
+      var lines = content.split('\n');
+      var isTypewriter = window._isFirstLogLoad && lines.length > 0;
+      window._isFirstLogLoad = false;
+
+      if (isTypewriter && lines.length < 200) {
+        el.className = 'log-content typewriter';
+        el.innerHTML = lines.map(function(line, i) {
+          return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
+        }).join('');
+      } else {
+        el.className = 'log-content';
+        el.innerHTML = content;
+      }
     }
 
     function setupAutoRefresh(isRunning) {
