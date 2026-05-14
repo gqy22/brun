@@ -215,6 +215,8 @@ code {
 .btn-primary:hover { background: var(--primary-hover); }
 .btn-outline { background: transparent; border-color: var(--border); color: var(--text); }
 .btn-outline:hover { background: var(--bg-alt); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: #b91c1c; }
 
 /* ===== Detail Page ===== */
 .detail-header {

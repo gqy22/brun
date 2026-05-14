@@ -21,8 +21,9 @@
     <div class="detail-header">
       <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
       <span class="detail-actions">
+        <button id="btn-kill" class="btn btn-sm btn-danger" style="display:none" onclick="doKill()">终止</button>
         <button id="btn-rerun" class="btn btn-sm btn-primary" style="display:none" onclick="doRerun()">重跑</button>
-        <button id="btn-copy-cmd" class="btn btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
+        <button id="btn-copy-cmd" class="btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
       </span>
     </div>
 
@@ -95,8 +96,9 @@
         ${d.note ? `<div class="info-item"><label>Note</label>${esc(d.note)}</div>` : ''}
       `;
 
-      // 重跑按钮
+      // 重跑按钮 + 终止按钮
       if (d.command) document.getElementById('btn-rerun').style.display = '';
+      if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
 
       // 输出文件
       loadArtifacts();
@@ -156,6 +158,18 @@
       const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
       const d = await r.json();
       alert(d.ok ? `已启动 (PID: ${d.pid})` : (d.error || '失败'));
+    }
+
+    async function doKill() {
+      if (!confirm('确定要终止这个运行中的任务？')) return;
+      const r = await fetch('/api/runs/' + RUN_ID + '/kill', { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) {
+        alert(`已终止进程 PID: ${d.killed}`);
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        alert(d.error || '终止失败');
+      }
     }
 
     function copyCmd() {

@@ -171,6 +171,10 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		}
 	}
 
+	// 保存 PID 到 .pid 文件（供 Web kill 接口使用）
+	pidFile := filepath.Join(filepath.Dir(stdoutPath), ".pid")
+	os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
+
 	// 等待命令完成或收到信号
 	done := make(chan error, 1)
 	go func() {

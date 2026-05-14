@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,7 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("GET /api/runs/{id}/logs", s.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.apiGetArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/rerun", s.apiRerun)
+	mux.HandleFunc("POST /api/runs/{id}/kill", s.apiKill)
 	mux.HandleFunc("GET /api/projects", s.apiProjects)
 	mux.HandleFunc("GET /api/tags", s.apiTags)
 
@@ -248,6 +250,45 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]any{"ok": true, "pid": c.Process.Pid, "cmd": run.Command})
+}
+
+func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := s.store.GetRun(id)
+	if err != nil {
+		httpError(w, err.Error(), 404)
+		return
+	}
+	if run.Status != "running" {
+		httpError(w, "只能终止运行中的任务", 400)
+		return
+	}
+
+	pidFile := filepath.Join(run.RunDir, ".pid")
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		httpError(w, "找不到进程信息（可能已结束）", 404)
+		return
+	}
+
+	var pid int
+	fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid)
+	if pid <= 0 {
+		httpError(w, "无效的 PID", 500)
+		return
+	}
+
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		httpError(w, fmt.Sprintf("进程 %d 不存在（可能已结束）", pid), 410)
+		return
+	}
+
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		p.Signal(syscall.SIGKILL)
+	}
+
+	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
 }
 
 func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {
