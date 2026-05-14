@@ -128,41 +128,49 @@ func openStore() (*internal.Store, error) {
 	return internal.NewStore(filepath.Join(internal.HomeDir(), "db.sqlite"))
 }
 
+
 // --- init ---
 
 func initCmd() *cobra.Command {
+	ex := "  # 生成 01_align.sh\n  brun init align\n\n  # 同名再次生成 → 01_align2.sh\n  brun init align\n\n  # 不同名 → 新编号\n  brun init call          # → 02_call.sh"
 	return &cobra.Command{
-		Use:     "init [项目名]",
-		Short:   "在当前目录生成 brun.yaml",
-		Long:    "在当前目录生成 brun.yaml 配置文件，用于定义项目名称、捕获规则和忽略模式。",
-		Example: `  # 在当前目录初始化（使用当前目录名作为项目名）
-  brun init
-
-  # 指定项目名
-  brun init my-genome-project`,
+		Use:     "init <名称>",
+		Short:   "在当前目录生成脚本模板",
+		Long:    "生成带标准注释头部的脚本模板。自动检测 conda 环境、计算编号（同名递增后缀）。",
+		Example: ex,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			project := ""
+			name := "script"
 			if len(args) > 0 {
-				project = args[0]
+				name = args[0]
 			}
 
-			cfgPath := filepath.Join(".", "brun.yaml")
-			if _, err := os.Stat(cfgPath); err == nil {
-				return fmt.Errorf("brun.yaml 已存在，如需重新生成请先删除")
+			scriptName, _ := cmd.NextScriptName(".", name)
+			scriptPath := filepath.Join(".", scriptName)
+
+			if _, err := os.Stat(scriptPath); err == nil {
+				return fmt.Errorf("%s 已存在，如需重新生成请先删除", scriptName)
 			}
 
-			err := cmd.WriteInitFile(".", project)
-			if err != nil {
-				return fmt.Errorf("生成配置失败: %w", err)
+			condaInfo := cmd.DetectCondaEnv()
+			created := time.Now().Format("2006-01-02 15:04")
+
+			content := cmd.GenerateScriptTemplate(name, name, condaInfo, created)
+			if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
+				return fmt.Errorf("生成脚本失败: %w", err)
 			}
 
-			fmt.Printf("✓ 配置文件已生成: %s\n", cfgPath)
-			fmt.Printf("  可编辑此文件自定义捕获规则和忽略模式\n")
-			fmt.Printf("  使用 'brun run -- <command>' 开始记录运行\n")
+			fmt.Printf("✓ %s\n", scriptName)
+			if condaInfo != "" {
+				fmt.Printf("  环境: %s\n", condaInfo)
+			}
+			fmt.Printf("  用法: brun run -- bash %s\n", scriptName)
 			return nil
 		},
 	}
 }
+
+
 
 // --- run (核心编排) ---
 
@@ -177,7 +185,7 @@ func runCmd() *cobra.Command {
 
 	c := &cobra.Command{
 		Use:     "run -- <command...>",
-			Short:   "执行命令并记录运行信息 (默认 nohup 后台运行)",
+		Short:   "执行命令并记录运行信息 (默认 nohup 后台运行)",
 		Long:    "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
 		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
   brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
