@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Run Detail - brun</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <a href="/">brun</a>
+    </div>
+    <div class="nav-links">
+      <a href="/">Dashboard</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <!-- 返回 + 操作栏 -->
+    <div class="detail-header">
+      <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
+      <span class="detail-actions">
+        <button id="btn-rerun" class="btn btn-sm btn-primary" style="display:none" onclick="doRerun()">重跑</button>
+        <button id="btn-copy-cmd" class="btn btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
+      </span>
+    </div>
+
+    <!-- 信息面板 -->
+    <div class="info-grid" id="info-panel">
+      <p class="text-muted">加载中...</p>
+    </div>
+
+    <!-- 日志查看器 -->
+    <div class="log-viewer">
+      <div class="log-tabs">
+        <button class="log-tab active" data-stream="stdout" onclick="switchLog('stdout')">stdout</button>
+        <button class="log-tab" data-stream="stderr" onclick="switchLog('stderr')">stderr</button>
+        <div class="log-toolbar">
+          <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value="">
+          <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px">
+          <label class="checkbox-inline">
+            <input type="checkbox" id="auto-refresh" checked> auto-refresh
+          </label>
+        </div>
+      </div>
+      <pre class="log-content" id="log-content"></pre>
+    </div>
+
+    <!-- 输出文件 -->
+    <div class="section">
+      <h3>输出文件</h3>
+      <table class="table" id="arts-table">
+        <thead><tr><th>Type</th><th>Status</th><th>Size</th><th>Path</th></tr></thead>
+        <tbody id="arts-tbody"><tr><td colspan="4" class="text-muted">-</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script>
+    const RUN_ID = window.location.pathname.split('/').pop();
+    let currentStream = 'stdout';
+    let refreshTimer = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDetail();
+      // 搜索回车触发
+      document.getElementById('log-search').addEventListener('input', debounce(renderLog, 200));
+      document.getElementById('log-tail').addEventListener('change', () => loadLog());
+    });
+
+    async function loadDetail() {
+      const r = await fetch('/api/runs/' + RUN_ID);
+      if (r.status === 404) { document.getElementById('info-panel').innerHTML = '<p class="text-danger">Run not found</p>'; return; }
+      const d = await r.json();
+
+      // 标题
+      document.title = `${d.name || d.id} - brun`;
+
+      // 信息面板
+      document.getElementById('info-panel').innerHTML = `
+        <div class="info-item"><label>Run ID</label><code>${d.id}</code></div>
+        ${d.name ? `<div class="info-item"><label>Name</label>${esc(d.name)}</div>` : ''}
+        <div class="info-item"><label>Project</label>${esc(d.project) || '-'}</div>
+        <div class="info-item"><label>Status</label><span class="badge badge-${d.status}">${d.status}</span></div>
+        <div class="info-item"><label>Command</label><code class="cmd-full" id="cmd-text">${esc(d.command)}</code></div>
+        <div class="info-item"><label>CWD</label><code>${esc(d.cwd)}</code></div>
+        <div class="info-item"><label>Started</label>${fmtTime(d.started_at)}</div>
+        <div class="info-item"><label>Ended</label>${fmtTime(d.ended_at) || '-'}</div>
+        <div class="info-item"><label>Duration</label>${d.duration || '-'}</div>
+        <div class="info-item"><label>Exit Code</label>${d.exit_code ?? '-'}</div>
+        ${d.git_commit ? `<div class="info-item"><label>Git</label><code>${esc(d.git_commit.substring(0,8))}${d.git_dirty ? ' (dirty)' : ''}</code></div>` : ''}
+        ${d.tags?.length ? `<div class="info-item"><label>Tags</label>${d.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div>` : ''}
+        ${d.note ? `<div class="info-item"><label>Note</label>${esc(d.note)}</div>` : ''}
+      `;
+
+      // 重跑按钮
+      if (d.command) document.getElementById('btn-rerun').style.display = '';
+
+      // 输出文件
+      loadArtifacts();
+
+      // 日志
+      loadLog();
+      setupAutoRefresh(d.status === 'running');
+    }
+
+    async function loadArtifacts() {
+      const arts = await fetch('/api/runs/' + RUN_ID + '/artifacts').then(r => r.json());
+      const tb = document.getElementById('arts-tbody');
+      if (!arts.length) { tb.innerHTML = '<tr><td colspan="4" class="text-muted">无输出文件</td></tr>'; return; }
+      tb.innerHTML = arts.map(a => `<tr><td>${esc(a.kind)}</td><td><span class="badge badge-${a.status}">${a.status}</span></td><td>${a.size}</td><td>${esc(a.path)}</td></tr>`).join('');
+    }
+
+    function switchLog(stream) {
+      currentStream = stream;
+      document.querySelectorAll('.log-tab').forEach(t => t.classList.toggle('active', t.dataset.stream === stream));
+      loadLog();
+    }
+
+    async function loadLog() {
+      const tail = document.getElementById('log-tail').value;
+      const params = new URLSearchParams({ stream: currentStream });
+      if (tail) params.set('tail', tail);
+      const d = await fetch('/api/runs/' + RUN_ID + '/logs?' + params.toString()).then(r => r.json());
+      window._logContent = d.content || '';
+      renderLog();
+    }
+
+    function renderLog() {
+      let content = window._logContent || '';
+      const q = document.getElementById('log-search').value;
+      if (q) {
+        const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        content = content.replace(re, m => `\x00MARK\x00${m}\x00/MARK\x00`);
+        content = content.replace(/\x00MARK\x00/g, '<mark>').replace(/\x00\/MARK\x00/g, '</mark>');
+      }
+      document.getElementById('log-content').innerHTML = esc(content) || '<span class="text-muted">(空)</span>';
+    }
+
+    function setupAutoRefresh(isRunning) {
+      if (refreshTimer) clearInterval(refreshTimer);
+      if (isRunning && document.getElementById('auto-refresh').checked) {
+        refreshTimer = setInterval(loadLog, 3000);
+      }
+    }
+
+    document.getElementById('auto-refresh')?.addEventListener('change', function() {
+      const isRunning = document.querySelector('.badge-running') !== null;
+      setupAutoRefresh(isRunning && this.checked);
+    });
+
+    async function doRerun() {
+      if (!confirm('确定要重跑这个命令？')) return;
+      const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
+      const d = await r.json();
+      alert(d.ok ? `已启动 (PID: ${d.pid})` : (d.error || '失败'));
+    }
+
+    function copyCmd() {
+      const cmd = document.getElementById('cmd-text')?.textContent || '';
+      navigator.clipboard.writeText(cmd).then(() => {
+        const b = document.getElementById('btn-copy-cmd');
+        const orig = b.textContent;
+        b.textContent = '已复制!';
+        setTimeout(() => b.textContent = orig, 1500);
+      });
+    }
+
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
+  </script>
+</body>
+</html>

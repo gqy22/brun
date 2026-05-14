@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - brun</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <a href="/">brun</a>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="active">Dashboard</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <!-- 过滤栏 -->
+    <div class="filter-bar">
+      <select id="filter-project" title="项目过滤">
+        <option value="">所有项目</option>
+      </select>
+      <select id="filter-status" title="状态过滤">
+        <option value="">所有状态</option>
+        <option value="running">运行中</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+      </select>
+      <select id="filter-tag" title="标签过滤">
+        <option value="">所有标签</option>
+      </select>
+      <input type="text" id="filter-search" placeholder="搜索命令..." class="filter-input">
+      <button onclick="loadRuns()" class="btn btn-sm">刷新</button>
+    </div>
+
+    <!-- 运行列表 -->
+    <table class="table" id="runs-table">
+      <thead>
+        <tr>
+          <th>Run ID</th>
+          <th>Name</th>
+          <th>Project</th>
+          <th>Status</th>
+          <th>Duration</th>
+          <th>Command</th>
+          <th>Started</th>
+        </tr>
+      </thead>
+      <tbody id="runs-tbody">
+        <tr><td colspan="7" class="text-center text-muted">加载中...</td></tr>
+      </tbody>
+    </table>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      loadFilters();
+      loadRuns();
+      // 自动刷新 running 任务
+      setInterval(loadRuns, 10000);
+    });
+
+    async function loadFilters() {
+      const [projects, tags] = await Promise.all([
+        fetch('/api/projects').then(r => r.json()),
+        fetch('/api/tags').then(r => r.json()),
+      ]);
+      const projSel = document.getElementById('filter-project');
+      projects.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        projSel.appendChild(opt);
+      });
+      const tagSel = document.getElementById('filter-tag');
+      tags.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        tagSel.appendChild(opt);
+      });
+      // 绑定过滤事件
+      ['filter-project','filter-status','filter-tag','filter-search'].forEach(id => {
+        document.getElementById(id).addEventListener('change', loadRuns);
+        document.getElementById(id).addEventListener('input', debounce(loadRuns, 300));
+      });
+    }
+
+    async function loadRuns() {
+      const params = new URLSearchParams();
+      const fp = document.getElementById('filter-project').value;
+      const fs = document.getElementById('filter-status').value;
+      const ft = document.getElementById('filter-tag').value;
+      const fq = document.getElementById('filter-search').value;
+      if (fp) params.set('project', fp);
+      if (fs) params.set('status', fs);
+      if (ft) params.set('tag', ft);
+      if (fq) params.set('search', fq);
+
+      const resp = await fetch('/api/runs?' + params.toString());
+      const runs = await resp.json();
+      const tbody = document.getElementById('runs-tbody');
+
+      if (runs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无运行记录</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = runs.map(r => `
+        <tr class="row-clickable" onclick="location.href='/run/${r.id}'">
+          <td><code class="run-id">${r.id}</code></td>
+          <td>${esc(r.name) || '-'}</td>
+          <td>${esc(r.project) || '-'}</td>
+          <td><span class="badge badge-${r.status}">${r.status}</span></td>
+          <td>${r.duration}</td>
+          <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
+          <td class="text-muted">${fmtTime(r.started_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
+  </script>
+</body>
+</html>

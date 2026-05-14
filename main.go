@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,12 @@ import (
 	"github.com/biotools/brun/internal"
 	"github.com/spf13/cobra"
 )
+
+//go:embed web/templates/*
+var webTemplates embed.FS
+
+//go:embed web/static/*
+var webStatic embed.FS
 
 var version = "0.1.0"
 
@@ -76,6 +83,7 @@ func main() {
 		noteCmd(),
 		rerunCmd(),
 		cleanCmd(),
+		webCmd(),
 	)
 	// 替换内置命令为中文描述
 	rootCmd.SetHelpCommand(&cobra.Command{
@@ -1063,6 +1071,46 @@ func parseTimeFilter(s string) string {
 	default:
 		return s // 原样返回，让 SQL 查询自然失败
 	}
+}
+
+// --- web ---
+
+func webCmd() *cobra.Command {
+	var port int
+	var addr string
+
+	c := &cobra.Command{
+		Use:   "web",
+		Short: "启动 Web Dashboard（局域网访问）",
+		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认端口 9213。",
+		Example: `  # 启动 Web Dashboard
+  brun web
+
+  # 指定端口
+  brun web --port 9090
+
+  # 局域网可访问
+  brun web --addr 0.0.0.0`,
+		RunE: func(c *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return fmt.Errorf("打开数据库失败: %w", err)
+			}
+
+			if addr == "" {
+				addr = "0.0.0.0"
+			}
+			if port == 0 {
+				port = 9213
+			}
+
+			srv := cmd.NewWebServer(store, addr, port, webTemplates, webStatic)
+				return srv.ListenAndServe()
+		},
+	}
+	c.Flags().IntVarP(&port, "port", "p", 9213, "监听端口")
+	c.Flags().StringVar(&addr, "addr", "0.0.0.0", "监听地址")
+	return c
 }
 
 func hostname() string {
