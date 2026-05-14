@@ -419,6 +419,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 		return fmt.Errorf("更新状态失败: %w", err)
 	}
 
+	// 保存资源数据
+	store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs)
+
 	// 15. 写 metadata.yaml
 	runRecord.Status = status
 	runRecord.ExitCode = result.ExitCode

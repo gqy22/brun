@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -141,26 +140,28 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 	note, _ := s.store.GetNote(run.ID)
 
 	jsonResponse(w, map[string]any{
-		"id":          run.ID,
-		"name":        run.Name,
-		"project":     run.Project,
-		"cwd":         run.CWD,
-		"command":     run.Command,
-		"status":      run.Status,
-		"exit_code":   run.ExitCode,
-		"started_at":  run.StartedAt,
-		"ended_at":    run.EndedAt,
-		"duration_ms": run.DurationMs,
-		"duration":    DurationString(run.DurationMs),
-		"hostname":    run.Hostname,
-		"username":    run.Username,
-		"git_repo":    run.GitRepo,
-		"git_branch":  run.GitBranch,
-		"git_commit":  run.GitCommit,
-		"git_dirty":   run.GitDirty,
-		"run_dir":     run.RunDir,
-		"tags":        tags,
-		"note":        note,
+		"id":           run.ID,
+		"name":         run.Name,
+		"project":      run.Project,
+		"cwd":          run.CWD,
+		"command":      run.Command,
+		"status":       run.Status,
+		"exit_code":    run.ExitCode,
+		"started_at":   run.StartedAt,
+		"ended_at":     run.EndedAt,
+		"duration_ms":  run.DurationMs,
+		"duration":     DurationString(run.DurationMs),
+		"hostname":     run.Hostname,
+		"username":     run.Username,
+		"git_repo":     run.GitRepo,
+		"git_branch":   run.GitBranch,
+		"git_commit":   run.GitCommit,
+		"git_dirty":    run.GitDirty,
+		"peak_rss_kb":  run.PeakRSSKB,
+		"cpu_time_ms":  run.CPUTimeMs,
+		"run_dir":      run.RunDir,
+		"tags":         tags,
+		"note":         note,
 	})
 }
 
@@ -245,17 +246,40 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := exec.CommandContext(r.Context(), cmdParts[0], cmdParts[1:]...)
-	c.Dir = run.CWD
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	// 生成全新任务记录
+	newID := internal.GenerateRunID()
+	newDir := internal.RunDir(newID)
+	os.MkdirAll(newDir, 0755)
 
-	if err := c.Start(); err != nil {
-		httpError(w, "rerun failed: "+err.Error(), 500)
+	stdoutPath := filepath.Join(newDir, "stdout.o")
+	stderrPath := filepath.Join(newDir, "stderr.er")
+
+	newRecord := &internal.Run{
+		ID:        newID,
+		Name:      run.Name,
+		Project:   run.Project,
+		CWD:       run.CWD,
+		Command:   run.Command,
+		Status:    "running",
+		RunDir:    newDir,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.store.CreateRun(newRecord); err != nil {
+		httpError(w, "创建任务失败: "+err.Error(), 500)
 		return
 	}
+	SaveCommandFile(newDir, run.Command)
+	SaveEnvFile(newDir)
 
-	jsonResponse(w, map[string]any{"ok": true, "pid": c.Process.Pid, "cmd": run.Command})
+	// 后台执行完整流程
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		result := ExecuteCommandWithSignal(cmdParts, run.CWD, stdoutPath, stderrPath, 0, sigCh)
+		s.store.UpdateRunStatus(newID, result.Status, result.ExitCode, result.EndedAt, result.DurationMs)
+		s.store.UpdateRunResources(newID, result.PeakRSSKB, result.CPUTimeMs)
+	}()
+
+	jsonResponse(w, map[string]any{"ok": true, "run_id": newID})
 }
 
 func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +325,12 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 		syscall.Kill(pid, syscall.SIGKILL)
 	}
 
+	// 等待进程退出后采集资源数据
+	time.Sleep(500 * time.Millisecond)
+	pss, cst := readProcStats(pid)
+	if pss > 0 || cst > 0 {
+		s.store.UpdateRunResources(id, pss, cst)
+	}
 	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
 }
 

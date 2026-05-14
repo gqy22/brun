@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +22,8 @@ type RunResult struct {
 	DurationMs int64
 	StartedAt  string
 	EndedAt    string
+	PeakRSSKB  int64
+	CPUTimeMs  int64
 }
 
 type RunRecord struct {
@@ -72,7 +76,6 @@ func ExecuteCommand(args []string, cwd, stdoutPath, stderrPath string, timeout t
 		Status:     status,
 		DurationMs: duration.Milliseconds(),
 		StartedAt:  start.UTC().Format(time.RFC3339),
-		EndedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
@@ -208,6 +211,8 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	if exitCode != 0 {
 		status = "failed"
 	}
+	// 采集资源数据
+	pss, cst := readProcStats(cmd.Process.Pid)
 
 	return RunResult{
 		ExitCode:   exitCode,
@@ -215,5 +220,53 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		DurationMs: duration.Milliseconds(),
 		StartedAt:  start.UTC().Format(time.RFC3339),
 		EndedAt:    time.Now().UTC().Format(time.RFC3339),
+	PeakRSSKB:  pss,
+	CPUTimeMs:  cst,
 	}
+}
+
+// readProcStats 从 /proc/{pid}/status 读取 VmHWM（峰值内存 KB）
+// 从 /proc/{pid}/stat 读取 utime+stime（CPU 时钟 tick 转 ms）
+// 进程已退出时返回零值
+func readProcStats(pid int) (peakRSSKB, cpuTimeMs int64) {
+	if pid <= 0 {
+		return 0, 0
+	}
+
+	// 读取 VmHWM (Peak Resident Set Size, 单位 KB)
+	statusPath := fmt.Sprintf("/proc/%d/status", pid)
+	if data, err := os.ReadFile(statusPath); err == nil {
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "VmHWM:") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					if v, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+						peakRSSKB = v
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// 读取 utime + stime (clock ticks → ms)
+	statPath := fmt.Sprintf("/proc/%d/stat", pid)
+	if data, err := os.ReadFile(statPath); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) > 14 {
+			var utime, stime uint64
+			if u, err := strconv.ParseUint(fields[13], 10, 64); err == nil {
+				utime = u
+			}
+			if s, err := strconv.ParseUint(fields[14], 10, 64); err == nil {
+				stime = s
+			}
+			ticksPerSec := int64(100)
+			cpuTimeMs = (int64(utime) + int64(stime)) * 1000 / ticksPerSec
+		}
+	}
+
+	return peakRSSKB, cpuTimeMs
 }

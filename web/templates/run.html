@@ -112,6 +112,14 @@
           <label>Exit Code</label>
           <div class="side-value"><code>${d.exit_code ?? '-'}</code></div>
         </div>
+        <div class="side-info">
+          <label>Peak Memory</label>
+          <div class="side-value">${fmtMem(d.peak_rss_kb)}</div>
+        </div>
+        <div class="side-info">
+          <label>CPU Time</label>
+          <div class="side-value">${fmtCPU(d.cpu_time_ms)}</div>
+        </div>
 
         <div class="side-group-title">命令与环境</div>
         <div class="side-info">
@@ -234,10 +242,15 @@
     });
 
     async function doRerun() {
-      modalConfirm('确认重跑', '确定要重新运行这个命令？', async () => {
+      modalConfirm('确认重跑', '将创建一个全新的任务记录并执行', async () => {
         const r = await fetch('/api/runs/' + RUN_ID + '/rerun', { method: 'POST' });
         const d = await r.json();
-        toast(d.ok ? 'success' : 'error', d.ok ? `已启动 (PID: ${d.pid})` : (d.error || '失败'));
+        if (d.ok && d.run_id) {
+          toast('success', '已创建新任务，正在跳转...');
+          setTimeout(() => location.href = '/run/' + d.run_id, 600);
+        } else {
+          toast('error', d.error || '失败');
+        }
       });
     }
 
@@ -273,6 +286,8 @@
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
+    function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }
+    function fmtCPU(ms) { if (!ms) return '-'; if (ms < 1000) return ms + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
   </script>
 </body>
 </html>

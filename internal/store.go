@@ -33,8 +33,10 @@ type Run struct {
 	Username   string
 	GitRepo    string
 	GitBranch  string
-	GitCommit  string
-	GitDirty   bool
+	GitCommit   string
+	GitDirty    bool
+	PeakRSSKB   int64
+	CPUTimeMs   int64
 }
 
 type Artifact struct {
@@ -108,6 +110,8 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL,
 			FOREIGN KEY(run_id) REFERENCES runs(id)
 		);`,
+		`ALTER TABLE runs ADD COLUMN peak_rss_kb INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN cpu_time_ms INTEGER DEFAULT 0`,
 	}
 	for _, m := range migrations {
 		if err := s.retryExec(m); err != nil {
@@ -176,11 +180,12 @@ func searchString(s, sub string) bool {
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,created_at,updated_at)
+		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,created_at,updated_at)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
+			r.PeakRSSKB, r.CPUTimeMs,
 		now, now,
 	)
 }
@@ -188,10 +193,10 @@ func (s *Store) CreateRun(r *Run) error {
 func (s *Store) GetRun(id string) (*Run, error) {
 	r := &Run{}
 	err := s.db.QueryRow(
-		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty FROM runs WHERE id=?`, id,
+		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms FROM runs WHERE id=?`, id,
 	).Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
-		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty)
+		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty, &r.PeakRSSKB, &r.CPUTimeMs)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
@@ -206,8 +211,15 @@ func (s *Store) UpdateRunStatus(id, status string, exitCode int, endedAt string,
 	)
 }
 
+func (s *Store) UpdateRunResources(id string, peakRSSKB, cpuTimeMs int64) error {
+	return s.retryExec(
+		`UPDATE runs SET peak_rss_kb=?, cpu_time_ms=? WHERE id=?`,
+		peakRSSKB, cpuTimeMs, id,
+	)
+}
+
 func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string) ([]*Run, error) {
-	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty FROM runs WHERE 1=1`
+	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms FROM runs WHERE 1=1`
 	args := []any{}
 
 	if project != "" {
@@ -251,7 +263,7 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 		r := &Run{}
 		err := rows.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 			&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
-			&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty)
+			&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty, &r.PeakRSSKB, &r.CPUTimeMs)
 		if err != nil {
 			return nil, err
 		}
