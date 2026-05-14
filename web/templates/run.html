@@ -39,6 +39,19 @@
 
       <!-- 右侧：日志 + 输出文件 -->
       <div class="detail-main">
+        ${d.script ? `
+        <!-- 脚本运行快照 -->
+        <div class="section" id="script-section">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <h3 style="margin:0">Script <span class="text-muted" style="font-weight:normal;font-size:12px">运行快照</span></h3>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制</button>
+              <button class="btn btn-sm btn-outline" onclick="toggleScript()"><span id="script-toggle-label">展开</span></button>
+            </div>
+          </div>
+          <pre id="script-content" style="max-height:0;overflow:hidden;font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;transition:max-height 0.3s">${esc(d.script)}</pre>
+        </div>` : ''}
+
         <!-- 日志查看器 -->
         <div class="log-viewer">
           <div class="log-tabs">
@@ -129,17 +142,6 @@
           <label>Command</label>
           <div class="cmd-compact" id="cmd-text">${esc(d.command)}<button class="cmd-copy-btn" onclick="copyCmd()" title="复制命令">复制</button></div>
         </div>
-        ${d.script ? `
-        <div class="side-info">
-          <label>Script <span class="text-muted" style="font-weight:normal;font-size:11px">(运行快照)</span></label>
-          <div class="script-snapshot" id="script-block">
-            <pre id="script-content" style="max-height:200px;overflow:auto;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-all">${esc(d.script)}</pre>
-            <div style="margin-top:4px;display:flex;gap:6px">
-              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制脚本</button>
-              <button class="btn btn-sm btn-outline" onclick="toggleScript()">展开/收起</button>
-            </div>
-          </div>
-        </div>` : ''}
         <div class="side-info">
           <label>Project</label>
           <div class="side-value">${esc(d.project) || '<span class=text-muted>-</span>'}</div>
@@ -388,12 +390,11 @@
 
     function toggleScript() {
       var el = document.getElementById('script-content');
+      var label = document.getElementById('script-toggle-label');
       if (!el) return;
-      if (el.style.maxHeight === '200px') {
-        el.style.maxHeight = '2000px';
-      } else {
-        el.style.maxHeight = '200px';
-      }
+      var isCollapsed = el.style.maxHeight === '0px' || el.style.maxHeight === '';
+      el.style.maxHeight = isCollapsed ? '500px' : '0px';
+      if (label) label.textContent = isCollapsed ? '收起' : '展开';
     }
 
     async function doDelete() {
