@@ -232,6 +232,9 @@ func runCmd() *cobra.Command {
 func executeRun(args []string, name, project, note string, tags []string,
 	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string) error {
 
+	// 后台模式: 忽略 SIGHUP，关闭终端后继续运行 (等效 nohup)
+	signal.Ignore(syscall.SIGHUP)
+
 	// 支持逗号分隔: -t align,hg38 等价于 -t align -t hg38
 	tags = splitComma(tags)
 	allowedExits := parseAllowExit(allowExit)
@@ -269,6 +272,13 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 5. 构建命令字符串
 	commandStr := strings.Join(args, " ")
+
+	// 5.5 预检查: 命令可执行文件是否存在
+	if exePath, err := exec.LookPath(args[0]); err != nil {
+		return fmt.Errorf("命令 '%s' 未找到: %w\n  提示: 使用 'brun run -- <command>' 确保命令在 PATH 中或使用完整路径", args[0], err)
+	} else {
+		args[0] = exePath // exec.LookPath 返回规范化路径
+	}
 
 	// 6. 保存 command.sh + env.txt
 	cmd.SaveCommandFile(runDir, commandStr)
@@ -406,6 +416,21 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 16. 打印摘要
 	fmt.Printf("\nCommand finished %s in %s\n", status, cmd.DurationString(result.DurationMs))
+	if status == "failed" {
+		if errData, err := os.ReadFile(stderrPath); err == nil {
+			if lines := strings.Split(strings.TrimRight(string(errData), "\r\n"), "\n"); len(lines) > 0 {
+				lastN := lines
+				if len(lastN) > 5 {
+					lastN = lastN[len(lastN)-5:]
+				}
+				fmt.Printf("stderr (last %d lines):\n", len(lastN))
+				for _, l := range lastN {
+					fmt.Printf("  %s\n", l)
+				}
+			}
+		}
+		fmt.Printf("完整日志: brun logs %s --stderr\n", runID)
+	}
 	arts, _ := store.GetArtifacts(runID)
 	if len(arts) > 0 {
 		fmt.Printf("Outputs detected: %d\n", len(arts))
@@ -479,7 +504,6 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 	cmd.Stderr = stderrF
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
-		Setsid:  true,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -607,23 +631,28 @@ func showCmd() *cobra.Command {
 func logsCmd() *cobra.Command {
 	var stdoutOnly, stderrOnly bool
 	var tailN int
-	var follow, openEditor bool
+	var follow bool
 
 	c := &cobra.Command{
-		Use:   "logs <run_id|latest>",
+		Use:   "logs [run_id]",
 		Short: "查看运行日志",
-		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。",
-		Example: `  # 查看最新运行的日志
+		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。不传参数默认查看最新运行。",
+		Example: `  # 查看最新运行的日志 (默认)
+  brun logs
   brun logs latest
 
   # 实时跟踪正在运行的命令输出
-  brun logs latest -f
+  brun logs -f
 
   # 只看最后 50 行 stderr
   brun logs <run_id> --stderr --tail 50`,
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
+			arg := "latest"
+			if len(args) > 0 {
+				arg = args[0]
+			}
+			runID, isLatest := cmd.ResolveRunID(arg)
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -652,6 +681,15 @@ func logsCmd() *cobra.Command {
 			}
 
 			// 普通模式：读取并显示
+			// 未指定 --stdout/--stderr 时，默认同时显示两者
+			if !stdoutOnly && !stderrOnly {
+				stdoutPath := filepath.Join(r.RunDir, "stdout.o")
+				stderrPath := filepath.Join(r.RunDir, "stderr.er")
+				printLogSection("stdout", stdoutPath, tailN)
+				printLogSection("stderr", stderrPath, tailN)
+				return nil
+			}
+
 			data, err := os.ReadFile(logFile)
 			if err != nil {
 				return fmt.Errorf("读取日志失败: %w", err)
@@ -668,7 +706,6 @@ func logsCmd() *cobra.Command {
 	c.Flags().BoolVar(&stderrOnly, "stderr", false, "只看 stderr")
 	c.Flags().IntVar(&tailN, "tail", 0, "最后 N 行")
 	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪 (类似 tail -f)")
-	c.Flags().BoolVar(&openEditor, "open", false, "用编辑器打开")
 	return c
 }
 
@@ -723,6 +760,24 @@ func followLog(path string, tailN int) error {
 	}
 
 	return nil
+}
+
+func printLogSection(label, path string, tailN int) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("[%s] (文件不存在)\n", label)
+		return
+	}
+	content := string(data)
+	if tailN > 0 {
+		content = cmd.TailLog(content, tailN)
+	}
+	if content == "" {
+		fmt.Printf("[%s] (空)\n", label)
+		return
+	}
+	fmt.Printf("=== %s ===\n", label)
+	fmt.Print(content)
 }
 
 // --- outputs ---
