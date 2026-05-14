@@ -279,14 +279,20 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		httpError(w, fmt.Sprintf("进程 %d 不存在（可能已结束）", pid), 410)
+	// 探活：signal 0 不发送实际信号，仅检查进程是否存在
+	if err := syscall.Kill(pid, 0); err != nil {
+		if err == syscall.ESRCH {
+			// 进程已不存在，自动修正状态为 failed
+			s.store.UpdateRunStatus(id, "failed", -1, "", 0)
+			jsonResponse(w, map[string]any{"ok": true, "msg": fmt.Sprintf("进程 %d 已不存在，已自动标记为 failed", pid)})
+			return
+		}
+		httpError(w, fmt.Sprintf("无法访问进程 %d: %v", pid, err), 500)
 		return
 	}
 
-	if err := p.Signal(syscall.SIGTERM); err != nil {
-		p.Signal(syscall.SIGKILL)
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		syscall.Kill(pid, syscall.SIGKILL)
 	}
 
 	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
