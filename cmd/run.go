@@ -144,6 +144,16 @@ func SaveEnvFile(runDir string) error {
 	return os.WriteFile(filepath.Join(runDir, "env.txt"), buf.Bytes(), 0644)
 }
 
+// SaveInputScript 将首个参数（如果是文件）的源码快照保存到 run 目录
+func SaveInputScript(runDir, scriptPath string) error {
+	data, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return err
+	}
+	name := filepath.Base(scriptPath)
+	return os.WriteFile(filepath.Join(runDir, "script."+name), data, 0644)
+}
+
 // ExecuteCommandWithSignal 执行命令并支持信号中断
 func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal) RunResult {
 	start := time.Now()

@@ -146,6 +146,7 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"project":     run.Project,
 		"cwd":         run.CWD,
 		"command":     run.Command,
+		"script":      readInputScript(run.RunDir),
 		"status":      run.Status,
 		"exit_code":   run.ExitCode,
 		"started_at":  run.StartedAt,
@@ -640,4 +641,22 @@ func (s *WebServer) readPID(runDir string) (int, bool) {
 		return pid, true
 	}
 	return 0, false
+}
+
+// readInputScript 读取 run 目录下保存的输入脚本快照
+func readInputScript(runDir string) string {
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "script.") {
+			data, err := os.ReadFile(filepath.Join(runDir, e.Name()))
+			if err != nil {
+				return ""
+			}
+			return string(data)
+		}
+	}
+	return ""
 }

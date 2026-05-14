@@ -129,6 +129,17 @@
           <label>Command</label>
           <div class="cmd-compact" id="cmd-text">${esc(d.command)}<button class="cmd-copy-btn" onclick="copyCmd()" title="复制命令">复制</button></div>
         </div>
+        ${d.script ? `
+        <div class="side-info">
+          <label>Script <span class="text-muted" style="font-weight:normal;font-size:11px">(运行快照)</span></label>
+          <div class="script-snapshot" id="script-block">
+            <pre id="script-content" style="max-height:200px;overflow:auto;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-all">${esc(d.script)}</pre>
+            <div style="margin-top:4px;display:flex;gap:6px">
+              <button class="btn btn-sm btn-outline" onclick="copyScript()">复制脚本</button>
+              <button class="btn btn-sm btn-outline" onclick="toggleScript()">展开/收起</button>
+            </div>
+          </div>
+        </div>` : ''}
         <div class="side-info">
           <label>Project</label>
           <div class="side-value">${esc(d.project) || '<span class=text-muted>-</span>'}</div>
@@ -365,6 +376,24 @@
         var btn = el ? el.querySelector('.cmd-copy-btn') : null;
         if (btn) { var orig = btn.textContent; btn.textContent = '已复制!'; setTimeout(() => btn.textContent = orig, 1200); }
       }).catch(() => toast('error', '复制失败'));
+    }
+
+    function copyScript() {
+      var el = document.getElementById('script-content');
+      if (!el) return;
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        toast('success', '脚本已复制到剪贴板');
+      }).catch(() => toast('error', '复制失败'));
+    }
+
+    function toggleScript() {
+      var el = document.getElementById('script-content');
+      if (!el) return;
+      if (el.style.maxHeight === '200px') {
+        el.style.maxHeight = '2000px';
+      } else {
+        el.style.maxHeight = '200px';
+      }
     }
 
     async function doDelete() {

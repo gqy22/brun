@@ -289,9 +289,12 @@ func executeRun(args []string, name, project, note string, tags []string,
 		args[0] = exePath // exec.LookPath 返回规范化路径
 	}
 
-	// 6. 保存 command.sh + env.txt
+	// 6. 保存 command.sh + env.txt + 输入脚本快照
 	cmd.SaveCommandFile(runDir, commandStr)
 	cmd.SaveEnvFile(runDir)
+	if info, _ := os.Stat(args[0]); info != nil && !info.IsDir() {
+		cmd.SaveInputScript(runDir, args[0])
+	}
 
 	// 7. 打印启动信息
 	fmt.Printf("Run started: %s\n", runID)
