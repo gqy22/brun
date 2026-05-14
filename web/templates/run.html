@@ -189,13 +189,14 @@
 
     function renderLog() {
       let content = window._logContent || '';
+      // 先转义防 XSS，再插入 mark 标签（顺序不能反）
+      content = esc(content);
       const q = document.getElementById('log-search').value;
       if (q) {
         const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        content = content.replace(re, m => `\x00MARK\x00${m}\x00/MARK\x00`);
-        content = content.replace(/\x00MARK\x00/g, '<mark>').replace(/\x00\/MARK\x00/g, '</mark>');
+        content = content.replace(re, m => '<mark>' + m + '</mark>');
       }
-      document.getElementById('log-content').innerHTML = esc(content) || '<span class="text-muted">(空)</span>';
+      document.getElementById('log-content').innerHTML = content || '<span class="text-muted">(空)</span>';
     }
 
     function setupAutoRefresh(isRunning) {
