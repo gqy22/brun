@@ -246,7 +246,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	// 1. 确定工作目录
 	cwd := cwdFlag
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		cwd = detectCWD(args[0])
 	}
 
 	// 2. 生成 run_id + 创建 run_dir
@@ -1072,6 +1072,40 @@ func hostname() string {
 
 func username() string {
 	return os.Getenv("USER")
+}
+
+// detectCWD 智能检测工作目录：
+//   - 如果首个参数是已存在的脚本文件（.sh/.py/.R/...），自动使用其所在目录
+//   - 否则回退到当前目录
+func detectCWD(firstArg string) string {
+	// 脚本文件扩展名白名单
+	scriptExts := map[string]bool{
+		".sh": true, ".bash": true, ".zsh": true,
+		".py": true, ".rb": true, ".pl": true,
+		".R": true, ".r": true, ".Rmd": true,
+		".js": true, ".ts": true,
+		".nf": true, ".smk": true,
+	}
+
+	ext := filepath.Ext(firstArg)
+	if !scriptExts[ext] {
+		cwd, _ := os.Getwd()
+		return cwd
+	}
+
+	absPath, err := filepath.Abs(firstArg)
+	if err != nil {
+		cwd, _ := os.Getwd()
+		return cwd
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil || info.IsDir() {
+		cwd, _ := os.Getwd()
+		return cwd
+	}
+
+	return filepath.Dir(absPath)
 }
 
 func ageSince(startedAt string) string {
