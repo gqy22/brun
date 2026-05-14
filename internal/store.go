@@ -114,7 +114,8 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN cpu_time_ms INTEGER DEFAULT 0`,
 	}
 	for _, m := range migrations {
-		if err := s.retryExec(m); err != nil {
+		err := s.retryExec(m)
+		if err != nil && !isDuplicateColumn(err) {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
@@ -166,6 +167,14 @@ func isBusyError(err error) bool {
 	return contains(msg, "SQLITE_BUSY") || contains(msg, "database is locked")
 }
 
+func isDuplicateColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return contains(msg, "duplicate column name")
+}
+
 func contains(s, sub string) bool { return len(s) >= len(sub) && searchString(s, sub) }
 
 func searchString(s, sub string) bool {
@@ -181,7 +190,7 @@ func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
 		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
