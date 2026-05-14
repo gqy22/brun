@@ -91,6 +91,7 @@
     let _logContent = '';
     let _renderedLines = 0;
     let _isFirstLogLoad = true;
+    let _escapedCache = '';     // 缓存已转义的全量内容
     let durationTimer = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -221,11 +222,10 @@
     function renderLog() {
       var el = document.getElementById('log-content');
       var q = document.getElementById('log-search').value;
-      var content = _logContent;
-
-      content = esc(content);
 
       if (q) {
+        // 搜索模式：只对当前内容做转义+高亮（内容不会持续增长）
+        var content = esc(_logContent);
         var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         content = content.replace(re, m => '<mark>' + m + '</mark>');
         el.className = 'log-content';
@@ -235,24 +235,37 @@
         return;
       }
 
-      if (!content) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
+      if (!_logContent) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
 
-      var lines = content.split('\n');
+      // 增量转义：只对新增部分做 esc，拼接缓存
+      var lines = _logContent.split('\n');
+      if (_escapedCache === '' || _isFirstLogLoad || _renderedLines === 0 || lines.length < _renderedLines) {
+        _isFirstLogLoad = false;
+        _escapedCache = esc(_logContent);
+        _renderedLines = 0;
+      }
+      if (_renderedLines < lines.length) {
+        var newLines = lines.slice(_renderedLines);
+        var escapedNew = newLines.map(function(line) { return esc(line); });
+        _escapedCache += escapedNew.join('\n') + (newLines.length > 0 ? '\n' : '');
+        _renderedLines = lines.length;
+      }
 
-      if (_isFirstLogLoad || _renderedLines === 0) {
+      if (_isFirstLogLoad || el.innerHTML === '') {
         _isFirstLogLoad = false;
         if (lines.length < 200) {
           el.className = 'log-content typewriter';
-          el.innerHTML = lines.map(function(line, i) {
+          var cachedLines = _escapedCache.split('\n');
+          el.innerHTML = cachedLines.map(function(line, i) {
             return '<div class="log-line" style="animation-delay:' + Math.min(i * 15, 1500) + 'ms">' + (line || '&nbsp;') + '</div>';
           }).join('');
         } else {
           el.className = 'log-content';
-          el.innerHTML = content;
+          el.innerHTML = _escapedCache;
         }
-        _renderedLines = lines.length;
       } else {
-        var newLines = lines.slice(_renderedLines);
+        // 增量 DOM 追加
+        var newLines = lines.slice(_renderedLines - newLines.length, _renderedLines);
         if (newLines.length > 0) {
           var frag = document.createDocumentFragment();
           newLines.forEach(function(line) {
@@ -262,7 +275,6 @@
             frag.appendChild(div);
           });
           el.appendChild(frag);
-          _renderedLines = lines.length;
         }
       }
 
@@ -306,6 +318,41 @@
       return h + 'h ' + min + 'm';
     }
 
+    // ===== 轻量级状态更新（SSE done 时调用，不重建整个面板） =====
+
+    function updateRunStatus(d) {
+      var panel = document.getElementById('info-panel');
+      if (!panel) return;
+
+      panel.className = 'sidebar-card status-' + (d.status || 'unknown');
+
+      // 更新 Status badge
+      var badge = panel.querySelector('.badge');
+      if (badge) { badge.className = 'badge badge-' + (d.status || 'unknown'); badge.textContent = d.status || ''; }
+
+      // 更新 Duration
+      var durEl = document.getElementById('duration-value');
+      if (durEl && d.duration) durEl.textContent = d.duration;
+
+      // 更新 Exit Code
+      var exitEl = panel.querySelectorAll('.side-value');
+      if (exitEl.length > 3 && d.exit_code !== undefined) exitEl[2].textContent = d.exit_code;
+
+      // 更新操作按钮
+      document.getElementById('btn-kill').style.display = (d.status === 'running') ? '' : 'none';
+      document.getElementById('btn-delete').style.display = (d.status === 'running') ? 'none' : '';
+      document.getElementById('btn-rerun').style.display = d.command ? '' : 'none';
+
+      // 更新 Ended 时间
+      var timeCells = panel.querySelectorAll('.side-value');
+      for (var i = 0; i < timeCells.length; i++) {
+        if (timeCells[i].textContent === '-' && d.ended_at) {
+          timeCells[i].innerHTML = fmtTime(d.ended_at);
+          break;
+        }
+      }
+    }
+
     // ===== SSE 实时流 =====
 
     function connectSSE() {
@@ -317,7 +364,8 @@
         var d = JSON.parse(evt.data);
         if (d.done) {
           disconnectSSE();
-          loadDetail();
+          stopDurationTimer();
+          updateRunStatus(d);
           return;
         }
         if (d.content) _logContent += d.content;

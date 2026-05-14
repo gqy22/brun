@@ -70,6 +70,10 @@
   <script src="/static/app.js"></script>
   <script>
     let autoRefreshTimer = null;
+    // 缓存上一次的 runs 数据，用于增量更新
+    let _prevRuns = [];
+    // running 任务的 {id: startedAt} 映射，用于本地计时
+    let _runningTimers = {};
 
     document.addEventListener('DOMContentLoaded', () => {
       loadFilters();
@@ -116,66 +120,246 @@
         const resp = await fetch('/api/runs?' + params.toString());
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const runs = await resp.json();
-        const tbody = document.getElementById('runs-tbody');
-        const cardList = document.getElementById('run-card-list');
 
-        if (!Array.isArray(runs) || runs.length === 0) {
-          // 空状态 — 表格和卡片都显示
-          var emptyHtml = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div><div class="empty-title">暂无运行记录</div><div class="empty-desc">运行你的第一个任务，这里会显示执行结果</div></div></td></tr>';
-          tbody.innerHTML = emptyHtml;
-          cardList.innerHTML = '';
-          if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
-          return;
-        }
+        // 增量更新表格（只修改变化的行）
+        incrementTableUpdate(runs);
 
-        // 桌面端表格
-        tbody.innerHTML = runs.map((r, i) => `
-          <tr class="row-clickable animate-in" style="animation-delay: ${i * 35}ms" onclick="location.href='/run/${r.id}'">
-            <td><code class="run-id">${esc(r.id)}</code></td>
-            <td>${esc(r.name) || '<span class=text-muted>-</span>'}</td>
-            <td>${esc(r.project) || '<span class=text-muted>-</span>'}</td>
-            <td><span class="badge badge-${r.status}">${r.status}</span></td>
-            <td>${r.duration || '-'}</td>
-            <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
-            <td class="text-muted" style="font-size:13px">${fmtTime(r.started_at)}</td>
-            <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
-          </tr>
-        `).join('');
+        // 增量更新卡片列表
+        incrementCardUpdate(runs);
 
-        // 移动端卡片
-        cardList.innerHTML = runs.map(r => `
-          <div class="run-card animate-in" onclick="location.href='/run/${r.id}'">
-            <div class="run-card-header">
-              <span class="run-card-id">${esc(r.id)}</span>
-              <span class="badge badge-${r.status}">${r.status}</span>
-            </div>
-            <div class="run-card-body">
-              ${r.name ? `<div class="run-card-row"><span class="label">Name</span><span class="value">${esc(r.name)}</span></div>` : ''}
-              <div class="run-card-row"><span class="label">Project</span><span class="value">${esc(r.project) || '-'}</span></div>
-              <div class="run-card-row"><span class="label">Duration</span><span class="value">${r.duration || '-'}</span></div>
-              <div class="run-card-cmd" title="${esc(r.command)}">${esc(r.command)}</div>
-            </div>
-            <div class="run-card-footer">
-              <span class="run-card-time">${fmtTime(r.started_at)}</span>
-              <button class="btn btn-sm btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除">删除</button>
-            </div>
-          </div>
-        `).join('');
+        // 管理 running 任务的本地计时器
+        manageRunningTimers(runs);
 
-        // 有 running 任务时才自动刷新
-        const hasRunning = runs.some(r => r.status === 'running');
-        if (hasRunning && !autoRefreshTimer) {
-          autoRefreshTimer = setInterval(loadRuns, 10000);
-        } else if (!hasRunning && autoRefreshTimer) {
-          clearInterval(autoRefreshTimer);
-          autoRefreshTimer = null;
-        }
+        _prevRuns = runs;
       } catch (err) {
         console.error('loadRuns error:', err);
         document.getElementById('runs-tbody').innerHTML =
           '<tr><td colspan="8" class="text-center text-danger">加载失败: ' + esc(err.message) + '</td></tr>';
       }
     }
+
+    // ===== 增量表格更新 =====
+
+    function incrementTableUpdate(runs) {
+      var tbody = document.getElementById('runs-tbody');
+      var cardList = document.getElementById('run-card-list');
+
+      if (!Array.isArray(runs) || runs.length === 0) {
+        if (tbody.innerHTML !== '') {
+          tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div><div class="empty-title">暂无运行记录</div><div class="empty-desc">运行你的第一个任务，这里会显示执行结果</div></div></td></tr>';
+          cardList.innerHTML = '';
+        }
+        stopAllRunningTimers();
+        return;
+      }
+
+      // 用 ID 做 index 快速查找
+      var prevMap = {};
+      _prevRuns.forEach(function(r) { prevMap[r.id] = r; });
+
+      var curMap = {};
+      runs.forEach(function(r) { curMap[r.id] = r; });
+
+      // 1. 更新已存在的行 / 2. 新增行 / 3. 删除消失的行
+      var htmlParts = [];
+      runs.forEach(function(r, i) {
+        var prev = prevMap[r.id];
+        var dur = prev && prev.status === 'running' ? getLocalDuration(r.id) : (r.duration || '-');
+
+        if (prev) {
+          // 已存在行 — 只更新变化的单元格
+          htmlParts.push(updateRowHtml(tbody.rows[i + 1], r, prev, dur));
+        } else {
+          // 新行
+          htmlParts.push({ action: 'add', html: buildRowHtml(r, i, dur) });
+        }
+      });
+
+      // 删除不再存在的行（倒序避免索引偏移）
+      _prevRuns.forEach(function(prev) {
+        if (!curMap[prev.id]) {
+          htmlParts.push({ action: 'del', id: prev.id });
+        }
+      });
+
+      // 执行 DOM 操作
+      htmlParts.forEach(function(op) {
+        if (op.action === 'add') {
+          var tr = document.createElement('tr');
+          tr.className = 'row-clickable animate-in';
+          tr.style.animationDelay = (htmlParts.indexOf(op) * 35) + 'ms';
+          tr.setAttribute('data-run-id', op.html.id);
+          tr.innerHTML = op.html.cells;
+          tr.onclick = function() { location.href = '/run/' + this.getAttribute('data-run-id'); };
+          tbody.appendChild(tr);
+        } else if (op.action === 'del') {
+          var row = tbody.querySelector('[data-run-id="' + op.id + '"]');
+          if (row) row.remove();
+        } else {
+          // 更新操作：op 本身就是更新后的 innerHTML 字符串
+          var row = tbody.querySelector('[data-run-id="' + op.html.id + '"]');
+          if (row) row.innerHTML = op.html;
+        }
+      });
+    }
+
+    function buildRowHtml(r, idx, dur) {
+      return {
+        id: r.id,
+        cells: '<td><code class="run-id">' + esc(r.id) + '</code></td>' +
+          '<td>' + (esc(r.name) || '<span class=text-muted>-</span>') + '</td>' +
+          '<td>' + (esc(r.project) || '<span class=text-muted>-</span>') + '</td>' +
+          '<td><span class="badge badge-' + r.status + '">' + r.status + '</span></td>' +
+          '<td class="duration-cell">' + dur + '</td>' +
+          '<td class="cmd-cell" title="' + esc(r.command) + '">' + esc(truncate(r.command, 60)) + '</td>' +
+          '<td class="text-muted" style="font-size:13px">' + fmtTime(r.started_at) + '</td>' +
+          '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-delete-row" onclick="deleteRun(\'' + r.id + '\',event)" title="删除此记录">删除</button></td>'
+      };
+    }
+
+    function updateRowHtml(row, r, prev, dur) {
+      var changed = false;
+      var html = '';
+
+      // Name
+      var nameCell = row.cells[1];
+      var newName = esc(r.name) || '<span class=text-muted>-</span>';
+      if (nameCell.innerHTML !== newName) { nameCell.innerHTML = newName; changed = true; }
+
+      // Status badge
+      var statusCell = row.cells[3];
+      var newStatus = '<span class="badge badge-' + r.status + '">' + r.status + '</span>';
+      if (statusCell.innerHTML !== newStatus) { statusCell.innerHTML = newStatus; changed = true; }
+
+      // Duration（running 时用本地计时值）
+      var durCell = row.cells[4];
+      if (durCell.textContent !== dur) { durCell.textContent = dur; durCell.className = 'duration-cell'; changed = true; }
+
+      // Command
+      var cmdCell = row.cells[5];
+      var newCmd = esc(truncate(r.command, 60));
+      if (cmdCell.textContent !== truncate(r.command, 60)) { cmdCell.title = esc(r.command); cmdCell.innerHTML = newCmd; changed = true; }
+
+      return { id: r.id, html: row.innerHTML, changed: changed };
+    }
+
+    // ===== 增量卡片更新 =====
+
+    function incrementCardUpdate(runs) {
+      var cardList = document.getElementById('run-card-list');
+      if (!Array.isArray(runs) || runs.length === 0) {
+        cardList.innerHTML = '';
+        return;
+      }
+
+      var prevMap = {};
+      _prevRuns.forEach(function(r) { prevMap[r.id] = r; });
+
+      var curMap = {};
+      runs.forEach(function(r) { curMap[r.id] = r; });
+
+      runs.forEach(function(r) {
+        var prev = prevMap[r.id];
+        var dur = prev && prev.status === 'running' ? getLocalDuration(r.id) : (r.duration || '-');
+        var card = cardList.querySelector('[data-card-id="' + r.id + '"]');
+
+        if (card) {
+          // 更新已有卡片
+          var badge = card.querySelector('.badge');
+          if (badge) { badge.className = 'badge badge-' + r.status; badge.textContent = r.status; }
+          var durEl = card.querySelector('.run-card-duration-value');
+          if (durEl) durEl.textContent = dur;
+        } else {
+          // 新增卡片
+          card = document.createElement('div');
+          card.className = 'run-card animate-in';
+          card.setAttribute('data-card-id', r.id);
+          card.onclick = function() { location.href = '/run/' + this.getAttribute('data-card-id'); };
+          card.innerHTML =
+            '<div class="run-card-header">' +
+              '<span class="run-card-id">' + esc(r.id) + '</span>' +
+              '<span class="badge badge-' + r.status + '">' + r.status + '</span>' +
+            '</div>' +
+            '<div class="run-card-body">' +
+              (r.name ? '<div class="run-card-row"><span class="label">Name</span><span class="value">' + esc(r.name) + '</span></div>' : '') +
+              '<div class="run-card-row"><span class="label">Project</span><span class="value">' + (esc(r.project) || '-') + '</span></div>' +
+              '<div class="run-card-row"><span class="label">Duration</span><span class="run-card-duration-value">' + dur + '</span></div>' +
+              '<div class="run-card-cmd" title="' + esc(r.command) + '">' + esc(truncate(r.command, 60)) + '</div>' +
+            '</div>' +
+            '<div class="run-card-footer">' +
+              '<span class="run-card-time">' + fmtTime(r.started_at) + '</span>' +
+              '<button class="btn btn-sm btn-delete-row" onclick="deleteRun(\'' + r.id + '\',event)" title="删除">删除</button>' +
+            '</div>';
+          cardList.appendChild(card);
+        }
+      });
+
+      // 移除消失的卡片
+      _prevRuns.forEach(function(prev) {
+        if (!curMap[prev.id]) {
+          var card = cardList.querySelector('[data-card-id="' + prev.id + '"]');
+          if (card) card.remove();
+        }
+      });
+    }
+
+    // ===== Running 任务本地计时器 =====
+
+    function manageRunningTimers(runs) {
+      var seen = {};
+      runs.forEach(function(r) {
+        if (r.status === 'running' && r.started_at) seen[r.id] = r.started_at;
+      });
+
+      // 启动新的计时器
+      Object.keys(seen).forEach(function(id) {
+        if (!_runningTimers[id]) {
+          _runningTimers[id] = seen[id];
+        }
+      });
+
+      // 清理已结束的计时器
+      Object.keys(_runningTimers).forEach(function(id) {
+        if (!seen[id]) {
+          delete _runningTimers[id];
+        }
+      });
+
+      // 首次有 running 任务时启动全局刷新
+      var hasRunning = Object.keys(_runningTimers).length > 0;
+      if (hasRunning && !autoRefreshTimer) {
+        autoRefreshTimer = setInterval(loadRuns, 10000);
+      } else if (!hasRunning && autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+    }
+
+    function stopAllRunningTimers() {
+      Object.keys(_runningTimers).forEach(function(id) { delete _runningTimers[id]; });
+      if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    }
+
+    function getLocalDuration(runId) {
+      var started = _runningTimers[runId];
+      if (!started) return '-';
+      var ms = Date.now() - new Date(started).getTime();
+      return formatDuration(ms);
+    }
+
+    function formatDuration(ms) {
+      if (ms < 1000) return ms + 'ms';
+      var s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      var m = Math.floor(s / 60);
+      var sec = s % 60;
+      if (m < 60) return m + 'm ' + sec + 's';
+      var h = Math.floor(m / 60);
+      var min = m % 60;
+      return h + 'h ' + min + 'm';
+    }
+
+    // ===== Footer Stats =====
 
     async function loadFooterStats() {
       try {
@@ -192,7 +376,7 @@
             '<div class="footer-stat"><div class="footer-stat-value">' + total + '</div><div class="footer-stat-label">总运行</div></div>' +
             '<div class="footer-stat"><div class="footer-stat-value">' + rate + '%</div><div class="footer-stat-label">成功率</div></div>' +
             '<div class="footer-stat"><div class="footer-stat-value">' + todayCount + '</div><div class="footer-stat-label">今日运行</div></div>' +
-          '</div>';
+            '</div>';
       } catch(e) { /* 静默失败 */ }
     }
 
@@ -205,7 +389,12 @@
       });
     }
 
-    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    function truncate(s, maxLen) {
+      if (!s || s.length <= maxLen) return s || '';
+      return s.substring(0, maxLen) + '...';
+    }
+
+    function debounce(fn, ms) { let t; return (...a) { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
   </script>
