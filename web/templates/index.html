@@ -116,12 +116,24 @@
           <td>${r.duration}</td>
           <td class="cmd-cell" title="${esc(r.command)}">${esc(r.command)}</td>
           <td class="text-muted">${fmtTime(r.started_at)}</td>
+          <td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm btn-outline btn-delete-row" onclick="deleteRun('${r.id}',event)" title="删除此记录">删除</button></td>
         </tr>
       `).join('');
     }
 
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    async function deleteRun(id, e) {
+      if (!confirm('确定删除这条运行记录？\n将同时删除日志和输出文件，不可恢复。')) return;
+      const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok) {
+        loadRuns(); // 刷新列表
+      } else {
+        alert(d.error || '删除失败');
+      }
+    }
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
   </script>
 </body>

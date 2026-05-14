@@ -50,6 +50,7 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.apiGetArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/rerun", s.apiRerun)
 	mux.HandleFunc("POST /api/runs/{id}/kill", s.apiKill)
+	mux.HandleFunc("DELETE /api/runs/{id}", s.apiDeleteRun)
 	mux.HandleFunc("GET /api/projects", s.apiProjects)
 	mux.HandleFunc("GET /api/tags", s.apiTags)
 
@@ -289,6 +290,24 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
+}
+
+func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := s.store.GetRun(id)
+	if err != nil {
+		httpError(w, err.Error(), 404)
+		return
+	}
+	if run.Status == "running" {
+		httpError(w, "请先终止运行中的任务再删除", 400)
+		return
+	}
+	if err := s.store.DeleteRun(id); err != nil {
+		httpError(w, "删除失败: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, map[string]any{"ok": true, "deleted": id})
 }
 
 func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {

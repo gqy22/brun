@@ -23,6 +23,7 @@
       <span class="detail-actions">
         <button id="btn-kill" class="btn btn-sm btn-danger" style="display:none" onclick="doKill()">终止</button>
         <button id="btn-rerun" class="btn btn-sm btn-primary" style="display:none" onclick="doRerun()">重跑</button>
+        <button id="btn-delete" class="btn btn-sm btn-outline" onclick="doDelete()">删除</button>
         <button id="btn-copy-cmd" class="btn-sm btn-outline" onclick="copyCmd()">复制命令</button>
       </span>
     </div>
@@ -99,6 +100,7 @@
       // 重跑按钮 + 终止按钮
       if (d.command) document.getElementById('btn-rerun').style.display = '';
       if (d.status === 'running') document.getElementById('btn-kill').style.display = '';
+      if (d.status !== 'running') document.getElementById('btn-delete').style.display = '';
 
       // 输出文件
       loadArtifacts();
@@ -180,6 +182,18 @@
         b.textContent = '已复制!';
         setTimeout(() => b.textContent = orig, 1500);
       });
+    }
+
+    async function doDelete() {
+      if (!confirm('确定要删除这条运行记录？\n将同时删除日志和输出文件，不可恢复。')) return;
+      const r = await fetch('/api/runs/' + RUN_ID, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok) {
+        alert('已删除');
+        location.href = '/';
+      } else {
+        alert(d.error || '删除失败');
+      }
     }
 
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

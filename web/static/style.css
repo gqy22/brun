@@ -217,6 +217,17 @@ code {
 .btn-outline:hover { background: var(--bg-alt); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover { background: #b91c1c; }
+.btn-delete-row {
+  padding: 3px 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+.btn-delete-row:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: #fef2f2;
+}
 
 /* ===== Detail Page ===== */
 .detail-header {

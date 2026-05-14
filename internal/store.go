@@ -353,6 +353,28 @@ func b2i(b bool) int {
 	return 0
 }
 
+func (s *Store) DeleteRun(id string) error {
+	tx, err := s.db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+
+	// 按顺序删除子表记录
+	tables := []string{"artifacts", "tags", "notes", "runs"}
+	for _, t := range tables {
+		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE run_id=?", t), id); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// 删除运行目录
+	runDir := RunDir(id)
+	os.RemoveAll(runDir)
+	return nil
+}
+
 func dirOf(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
 		if path[i] == '/' {
