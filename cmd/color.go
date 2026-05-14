@@ -38,13 +38,13 @@ func colorize(color, s string) string {
 	return color + s + reset
 }
 
-func Bold(s string) string     { return colorize(bold, s) }
-func Red(s string) string      { return colorize(red, s) }
-func Green(s string) string    { return colorize(green, s) }
-func Yellow(s string) string   { return colorize(yellow, s) }
-func Cyan(s string) string     { return colorize(cyan, s) }
-func Gray(s string) string     { return colorize(gray, s) }
-func Dim(s string) string      { return colorize(dim, s) }
+func Bold(s string) string   { return colorize(bold, s) }
+func Red(s string) string    { return colorize(red, s) }
+func Green(s string) string  { return colorize(green, s) }
+func Yellow(s string) string { return colorize(yellow, s) }
+func Cyan(s string) string   { return colorize(cyan, s) }
+func Gray(s string) string   { return colorize(gray, s) }
+func Dim(s string) string    { return colorize(dim, s) }
 
 // StatusColor 根据状态返回带颜色的字符串
 func StatusColor(status string) string {

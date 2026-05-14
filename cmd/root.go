@@ -177,7 +177,8 @@ func DetectCondaEnv() (envStr string) {
 	}
 	return result
 }
-	type CleanItem struct {
+
+type CleanItem struct {
 	RunID  string
 	Age    string
 	Size   string
