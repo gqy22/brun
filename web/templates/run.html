@@ -78,6 +78,7 @@
     let _logContent = '';
     let _renderedLines = 0;
     let _isFirstLogLoad = true;
+    let durationTimer = null;
 
     document.addEventListener('DOMContentLoaded', () => {
       loadDetail();
@@ -108,7 +109,7 @@
         </div>
         <div class="side-info">
           <label>Duration</label>
-          <div class="side-value"><strong style="font-size:18px">${d.duration || '-'}</strong></div>
+          <div class="side-value"><strong id="duration-value" style="font-size:18px">${d.duration || '-'}</strong></div>
         </div>
         <div class="side-info">
           <label>Exit Code</label>
@@ -171,6 +172,8 @@
 
       loadArtifacts();
       loadLog();
+      stopDurationTimer();
+      if (d.status === 'running' && d.started_at) startDurationTimer(d.started_at);
       if (d.status === 'running') connectSSE();
     }
 
@@ -257,6 +260,37 @@
       if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
         el.scrollTop = el.scrollHeight;
       }
+    }
+
+    // ===== Duration 实时计时器 =====
+
+    function startDurationTimer(startedAt) {
+      stopDurationTimer();
+      var start = new Date(startedAt).getTime();
+      var el = document.getElementById('duration-value');
+      durationTimer = setInterval(function () {
+        var ms = Date.now() - start;
+        el.textContent = formatDuration(ms);
+      }, 1000);
+      // 立即执行一次
+      var ms = Date.now() - start;
+      el.textContent = formatDuration(ms);
+    }
+
+    function stopDurationTimer() {
+      if (durationTimer) { clearInterval(durationTimer); durationTimer = null; }
+    }
+
+    function formatDuration(ms) {
+      if (ms < 1000) return ms + 'ms';
+      var s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      var m = Math.floor(s / 60);
+      var sec = s % 60;
+      if (m < 60) return m + 'm ' + sec + 's';
+      var h = Math.floor(m / 60);
+      var min = m % 60;
+      return h + 'h ' + min + 'm';
     }
 
     // ===== SSE 实时流 =====
