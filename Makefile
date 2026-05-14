@@ -14,7 +14,7 @@ TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 
 build:
 	@mkdir -p $(BINDIR)
-	go build -o $(BINDIR)/$(BINARY) $(LDFLAGS) $(SRC)
+	CGO_ENABLED=0 go build -o $(BINDIR)/$(BINARY) $(LDFLAGS) $(SRC)
 
 test:
 	go test ./... -v -count=1
@@ -47,10 +47,10 @@ release-all: $(TARGETS)
 	@ls -lh dist/
 
 dist/$(BINARY)-%-amd64:
-	GOOS=$* GOARCH=amd64 go build -o $@ $(LDFLAGS) $(SRC)
+	CGO_ENABLED=0 GOOS=$* GOARCH=amd64 go build -o $@ $(LDFLAGS) $(SRC)
 
 dist/$(BINARY)-%-arm64:
-	GOOS=$* GOARCH=arm64 go build -o $@ $(LDFLAGS) $(SRC)
+	CGO_ENABLED=0 GOOS=$* GOARCH=arm64 go build -o $@ $(LDFLAGS) $(SRC)
 
 release-linux-amd64: dist/$(BINARY)-linux-amd64
 	upx --best --lzma $<
