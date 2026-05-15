@@ -1,5 +1,6 @@
 /* ===== Reset & Base ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[x-cloak] { display: none !important; }
 
 :root {
   /* 色彩体系 — 冷调科技感 slate */
@@ -364,6 +365,16 @@ code {
   color: var(--text);
 }
 .btn-outline:hover { background: var(--bg-alt); border-color: #c0c8d4; }
+.btn-subtle {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-subtle:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: rgba(220,38,38,.18);
+}
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover { background: #b91c1c; box-shadow: 0 4px 14px rgba(220,38,38,.3); }
 
@@ -388,10 +399,51 @@ code {
 .detail-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 20px;
+  gap: 18px;
 }
-.detail-actions { display: flex; gap: 8px; }
+.detail-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+.detail-title {
+  min-width: 0;
+  padding-top: 1px;
+}
+.detail-title-main {
+  max-width: min(760px, 58vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--text);
+}
+.detail-title-sub {
+  max-width: min(860px, 62vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.detail-title-dot {
+  color: var(--text-dim);
+  margin: 0 6px;
+}
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 /* 主体：左右两栏 */
 .detail-body {
@@ -426,6 +478,78 @@ code {
 .sidebar-card.status-failed::before { background: linear-gradient(to bottom, var(--danger), #f97316); }
 .sidebar-card.status-running::before { background: linear-gradient(to bottom, var(--running), #06b6d4); }
 
+.run-summary {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 14px;
+}
+.run-summary-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.summary-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.run-summary-id {
+  display: inline-block;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  background: var(--code-bg);
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--code-text);
+}
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.summary-metric {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+.summary-metric span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .45px;
+  color: var(--text-dim);
+}
+.summary-metric strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.25;
+  color: var(--text);
+}
+.summary-metric-primary {
+  grid-column: 1 / -1;
+  background: var(--primary-bg);
+  border-color: rgba(37,99,235,.16);
+}
+.summary-metric-primary strong {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
 /* 紧凑 info-item — 单列 */
 .side-info { margin-bottom: 14px; }
 .side-info:last-child { margin-bottom: 0; }
@@ -441,6 +565,19 @@ code {
 .side-info .side-value {
   font-size: 14px;
   word-break: break-all;
+}
+.side-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px !important;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.time-ago {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .side-info .cmd-compact {
   font-family: 'JetBrains Mono', monospace;
@@ -572,6 +709,13 @@ code {
   align-items: center;
   padding: 8px 0;
 }
+.log-meta {
+  min-width: 58px;
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .input-sm {
   padding: 7px 11px;
   border: 1px solid var(--border);
@@ -677,10 +821,17 @@ code {
 .script-viewer::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }
 
 /* ===== Section ===== */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
 .section h3 {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 14px;
+  margin-bottom: 0;
   color: var(--text);
   display: flex;
   align-items: center;
@@ -692,6 +843,26 @@ code {
   height: 16px;
   background: var(--primary);
   border-radius: 2px;
+}
+.section-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.empty-inline {
+  padding: 30px 18px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.empty-inline-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.empty-inline-desc {
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 /* ===== Toast 通知 ===== */
@@ -995,6 +1166,10 @@ code {
 
 /* ===== Responsive ===== */
 @media (max-width: 1024px) {
+  .detail-header { flex-direction: column; }
+  .detail-actions { justify-content: flex-start; }
+  .detail-title-main,
+  .detail-title-sub { max-width: calc(100vw - 56px); }
   .detail-body { flex-direction: column; }
   .detail-sidebar { width: 100%; }
   .detail-main .log-content { max-height: 400px; min-height: 200px; }
@@ -1018,5 +1193,8 @@ code {
   .toast-container { right: 12px; left: 12px; }
   .toast { max-width: 100%; }
   .btn-delete-row { opacity: 1; }
+  .detail-heading { flex-direction: column; gap: 10px; }
+  .detail-actions { width: 100%; }
+  .summary-metrics { grid-template-columns: 1fr 1fr; }
   .detail-sidebar { width: 100%; }
 }

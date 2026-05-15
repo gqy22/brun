@@ -16,12 +16,22 @@
   <main class="container detail-page" x-data="detailPage()" x-init="init()">
     <!-- 返回 + 操作栏 -->
     <div class="detail-header">
-      <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
+      <div class="detail-heading">
+        <a href="/" class="btn btn-sm btn-outline">&larr; 返回列表</a>
+        <div class="detail-title" x-cloak x-show="detail.id">
+          <div class="detail-title-main" x-text="detail.name || detail.id"></div>
+          <div class="detail-title-sub">
+            <span x-text="detail.project || 'no project'"></span>
+            <span class="detail-title-dot">/</span>
+            <span x-text="detail.cwd || '-'"></span>
+          </div>
+        </div>
+      </div>
       <span class="detail-actions">
-        <button x-show="detail.status==='running'" @click="doKill()" class="btn btn-sm btn-danger">终止</button>
         <button x-show="detail.command" @click="doRerun()" class="btn btn-sm btn-primary">重跑</button>
-        <button x-show="detail.status!=='running'" @click="doDelete()" class="btn btn-sm btn-outline">删除</button>
         <button @click="copyCmd()" class="btn btn-sm btn-outline">复制命令</button>
+        <button x-show="detail.status==='running'" @click="doKill()" class="btn btn-sm btn-danger">终止</button>
+        <button x-show="detail.status!=='running'" @click="doDelete()" class="btn btn-sm btn-subtle">删除</button>
       </span>
     </div>
 
@@ -35,37 +45,38 @@
 
           <template x-if="detail.id">
             <div>
-              <div class="side-info">
-                <label>Run ID</label>
-                <div class="side-value"><code x-text="detail.id"></code></div>
-              </div>
-              <template x-if="detail.name">
-                <div class="side-info"><label>Name</label><div class="side-value" x-text="detail.name"></div></div>
-              </template>
-
-              <div class="side-group-title">执行状态</div>
-              <div class="side-info">
-                <label>Status</label>
-                <div class="side-value"><span :class="'badge badge-'+(detail.status||'unknown')" x-text="detail.status"></span></div>
-              </div>
-              <div class="side-info">
-                <label>Duration</label>
-                <div class="side-value"><strong id="duration-value" style="font-size:18px" x-text="displayDuration"></strong></div>
-              </div>
-              <div class="side-info">
-                <label>Exit Code</label>
-                <div class="side-value"><code x-text="detail.exit_code ?? '-'"></code></div>
-              </div>
-              <div class="side-info">
-                <label>Peak Memory</label>
-                <div class="side-value" x-text="fmtMem(detail.peak_rss_kb)"></div>
-              </div>
-              <div class="side-info">
-                <label>CPU Time</label>
-                <div class="side-value" x-text="fmtCPU(detail.cpu_time_ms)"></div>
+              <div class="run-summary">
+                <div class="run-summary-top">
+                  <div>
+                    <div class="summary-label">Run ID</div>
+                    <code class="run-summary-id" x-text="detail.id"></code>
+                  </div>
+                  <span :class="'badge badge-'+(detail.status||'unknown')" x-text="detail.status"></span>
+                </div>
+                <div class="summary-metrics">
+                  <div class="summary-metric summary-metric-primary">
+                    <span>Duration</span>
+                    <strong id="duration-value" x-text="displayDuration"></strong>
+                  </div>
+                  <div class="summary-metric">
+                    <span>Exit</span>
+                    <strong x-text="detail.exit_code ?? '-'"></strong>
+                  </div>
+                  <div class="summary-metric">
+                    <span>Memory</span>
+                    <strong x-text="fmtMem(detail.peak_rss_kb)"></strong>
+                  </div>
+                  <div class="summary-metric">
+                    <span>CPU</span>
+                    <strong x-text="fmtCPU(detail.cpu_time_ms)"></strong>
+                  </div>
+                </div>
               </div>
 
               <div class="side-group-title">命令与环境</div>
+              <template x-if="detail.name">
+                <div class="side-info"><label>Name</label><div class="side-value" x-text="detail.name"></div></div>
+              </template>
               <div class="side-info">
                 <label>Command</label>
                 <div class="cmd-compact" id="cmd-text">
@@ -79,9 +90,7 @@
               </div>
               <div class="side-info">
                 <label>CWD</label>
-                <div class="side-value" :title="detail.cwd"
-                     style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                     x-text="detail.cwd || '-'"></div>
+                <div class="side-value side-path" :title="detail.cwd" x-text="detail.cwd || '-'"></div>
               </div>
 
               <div class="side-group-title">时间信息</div>
@@ -89,7 +98,7 @@
                 <label>Started</label>
                 <div class="side-value">
                   <span x-text="fmtTime(detail.started_at)"></span>
-                  <span class="text-muted" style="margin-left:6px;font-size:12px" x-text="timeAgo(detail.started_at)"></span>
+                  <span class="time-ago" x-text="timeAgo(detail.started_at)"></span>
                 </div>
               </div>
               <div class="side-info">
@@ -134,6 +143,7 @@
             <button class="log-tab" :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
             <button class="log-tab" :class="{active:tab==='stderr'}" @click="switchTab('stderr')">stderr</button>
             <div class="log-toolbar" x-show="tab!=='script'">
+              <span class="log-meta" x-text="logMeta"></span>
               <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value=""
                      @change="loadLog()">
               <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px"
@@ -160,13 +170,23 @@
 
         <!-- 输出文件 -->
         <div class="section">
-          <h3>输出文件</h3>
+          <div class="section-header">
+            <h3>输出文件</h3>
+            <span class="section-count" x-text="artifacts.length + ' items'"></span>
+          </div>
           <div class="table-wrap">
             <table class="table">
               <thead><tr><th>Type</th><th>Status</th><th>Size</th><th>Path</th></tr></thead>
               <tbody id="arts-tbody">
                 <template x-if="artifacts.length === 0">
-                  <tr><td colspan="4" class="text-muted" style="padding:20px">无输出文件</td></tr>
+                  <tr>
+                    <td colspan="4">
+                      <div class="empty-inline">
+                        <div class="empty-inline-title">无输出文件</div>
+                        <div class="empty-inline-desc">本次运行未检测到新增或修改的产物。</div>
+                      </div>
+                    </td>
+                  </tr>
                 </template>
                 <template x-for="a in artifacts" :key="a.path">
                   <tr>
@@ -255,7 +275,19 @@
           var parts = [];
           if (this.scriptName) parts.push(this.scriptName);
           parts.push(this.scriptLang);
+          parts.push(this.scriptLineCount + ' lines');
           return parts.join(' · ');
+        },
+
+        get scriptLineCount() {
+          if (!this.scriptDisplayContent) return 0;
+          return this.scriptDisplayContent.split('\n').length;
+        },
+
+        get logMeta() {
+          if (!this._logContent) return '0 lines';
+          var lines = this._logContent.split('\n').length;
+          return lines.toLocaleString() + ' lines';
         },
 
         renderScript() {
