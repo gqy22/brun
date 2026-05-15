@@ -49,6 +49,7 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	ws := NewWebServer(store, "127.0.0.1", 0, os.DirFS("."), os.DirFS("."))
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runs/{id}", ws.apiGetRun)
 	mux.HandleFunc("GET /api/runs/{id}/logs", ws.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/logs/stream", ws.apiStreamLogs)
 
@@ -68,6 +69,31 @@ func (ts *testSrv) doReq(method, target string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	ts.mux.ServeHTTP(w, req)
 	return w
+}
+
+func TestApiGetRun_ReturnsScriptSnapshotNameAndContent(t *testing.T) {
+	srv, runID := newTestServer(t)
+	runDir := srv.getTestRunDir(t, runID)
+	script := "echo hello\n"
+	if err := os.WriteFile(filepath.Join(runDir, "script.test.sh"), []byte(script), 0644); err != nil {
+		t.Fatalf("写入脚本快照失败: %v", err)
+	}
+
+	w := srv.doReq("GET", "/api/runs/"+runID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["script_name"] != "test.sh" {
+		t.Errorf("script_name = %q, want test.sh", resp["script_name"])
+	}
+	if resp["script"] != script {
+		t.Errorf("script = %q, want %q", resp["script"], script)
+	}
 }
 
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body

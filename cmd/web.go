@@ -140,6 +140,7 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 
 	tags, _ := s.store.GetTags(run.ID)
 	note, _ := s.store.GetNote(run.ID)
+	script := readInputScript(run.RunDir)
 
 	jsonResponse(w, map[string]any{
 		"id":          run.ID,
@@ -147,7 +148,8 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"project":     run.Project,
 		"cwd":         run.CWD,
 		"command":     run.Command,
-		"script":      readInputScript(run.RunDir),
+		"script":      script.Content,
+		"script_name": script.Name,
 		"status":      run.Status,
 		"exit_code":   run.ExitCode,
 		"started_at":  run.StartedAt,
@@ -644,12 +646,17 @@ func (s *WebServer) readPID(runDir string) (int, bool) {
 	return 0, false
 }
 
+type inputScript struct {
+	Name    string
+	Content string
+}
+
 // readInputScript 读取 run 目录下保存的输入脚本快照
 // 跳过二进制文件（含 NULL 字节）和超大文件（>2MB）
-func readInputScript(runDir string) string {
+func readInputScript(runDir string) inputScript {
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
-		return ""
+		return inputScript{}
 	}
 	for _, e := range entries {
 		if !strings.HasPrefix(e.Name(), "script.") {
@@ -657,13 +664,14 @@ func readInputScript(runDir string) string {
 		}
 		data, err := os.ReadFile(filepath.Join(runDir, e.Name()))
 		if err != nil {
-			return ""
+			return inputScript{}
 		}
 		// 跳过二进制文件和过大文件
 		if len(data) > 2*1024*1024 || bytes.Contains(data, []byte{0}) {
-			return ""
+			return inputScript{}
 		}
-		return string(data)
+		name := strings.TrimPrefix(e.Name(), "script.")
+		return inputScript{Name: name, Content: string(data)}
 	}
-	return ""
+	return inputScript{}
 }

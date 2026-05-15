@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Run Detail - brun</title>
+  <link rel="stylesheet" href="/static/highlight-github-dark.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -128,10 +129,10 @@
       <div class="detail-main">
         <div class="log-viewer">
           <div class="log-tabs">
-            <button x-show="scriptContent" :class="{active:tab==='script'}"
+            <button class="log-tab" x-show="scriptContent" :class="{active:tab==='script'}"
                     @click="switchTab('script')" data-tab="script">Script</button>
-            <button :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
-            <button :class="{active:tab==='stderr'}" @click="switchTab('stderr')">stderr</button>
+            <button class="log-tab" :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
+            <button class="log-tab" :class="{active:tab==='stderr'}" @click="switchTab('stderr')">stderr</button>
             <div class="log-toolbar" x-show="tab!=='script'">
               <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value=""
                      @change="loadLog()">
@@ -142,14 +143,16 @@
               </label>
             </div>
             <div class="log-toolbar" x-show="tab==='script'">
+              <span class="script-meta" x-text="scriptMeta"></span>
               <button class="btn btn-sm btn-outline" @click="copyScript()">复制脚本</button>
             </div>
           </div>
 
           <!-- Script 面板 -->
-          <pre x-show="tab==='script'" id="script-panel"
-               style="font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:4px;white-space:pre-wrap;word-break:break-all"
-               x-text="scriptDisplayContent"></pre>
+          <div x-show="tab==='script'" id="script-panel" class="script-viewer">
+            <pre id="script-line-numbers" class="script-line-numbers" aria-hidden="true"></pre>
+            <pre class="script-content"><code id="script-code"></code></pre>
+          </div>
 
           <!-- 日志面板 -->
           <pre class="log-content" id="log-content" x-show="tab!=='script'"></pre>
@@ -181,7 +184,10 @@
     </div>
   </main>
 
+  <div class="toast-container" id="toast-container"></div>
+
   <script src="/static/app.js"></script>
+  <script src="/static/highlight.min.js"></script>
   <script src="/static/alpine.js" defer></script>
   <script>
     function detailPage() {
@@ -191,6 +197,7 @@
         tab: 'stdout',
         currentStream: 'stdout',
         scriptContent: '',
+        scriptName: '',
         artifacts: [],
         // --- 日志状态 ---
         logOffset: 0,
@@ -212,6 +219,7 @@
           this.tab = t;
           if (t === 'script') {
             this.disconnectSSE();
+            this.renderScript();
           } else {
             this.currentStream = t;
             this.disconnectSSE();
@@ -239,6 +247,39 @@
           return this.scriptContent;
         },
 
+        get scriptLang() {
+          return scriptLangFromName(this.scriptName);
+        },
+
+        get scriptMeta() {
+          var parts = [];
+          if (this.scriptName) parts.push(this.scriptName);
+          parts.push(this.scriptLang);
+          return parts.join(' · ');
+        },
+
+        renderScript() {
+          var self = this;
+          setTimeout(function() {
+            var el = document.getElementById('script-code');
+            var lines = document.getElementById('script-line-numbers');
+            if (!el) return;
+            var content = self.scriptDisplayContent;
+            el.textContent = content;
+            if (lines) {
+              var count = content ? content.split('\n').length : 1;
+              var nums = [];
+              for (var i = 1; i <= count; i++) nums.push(i);
+              lines.textContent = nums.join('\n');
+            }
+            el.className = 'language-' + self.scriptLang;
+            if (window.hljs) {
+              el.removeAttribute('data-highlighted');
+              window.hljs.highlightElement(el);
+            }
+          }, 0);
+        },
+
         async loadDetail() {
           try {
             var r = await fetch('/api/runs/' + RUN_ID);
@@ -247,6 +288,9 @@
             document.title = (d.name || d.id) + ' - brun';
             this.detail = d;
             this.scriptContent = d.script || '';
+            this.scriptName = d.script_name || '';
+            this.displayDuration = d.duration || formatDuration(d.duration_ms) || '-';
+            this.renderScript();
             await this.loadArtifacts();
             this.loadLog();
             this.stopDurationTimer();
@@ -292,19 +336,19 @@
           if (!this._logContent) { el.innerHTML = '<span class="text-muted">(空)</span>'; return; }
 
           var lines = this._logContent.split('\n');
-          if (this._escapedCache === '' || this._isFirstLogLoad || this._renderedLines === 0 || lines.length < this._renderedLines) {
-            this._isFirstLogLoad = false;
+          var previousRenderedLines = this._renderedLines;
+          var needsFullRender = this._escapedCache === '' || this._isFirstLogLoad || this._renderedLines === 0 || lines.length < this._renderedLines;
+          if (needsFullRender) {
             this._escapedCache = esc(this._logContent);
-            this._renderedLines = 0;
-          }
-          if (this._renderedLines < lines.length) {
+            this._renderedLines = lines.length;
+          } else if (this._renderedLines < lines.length) {
             var newLines = lines.slice(this._renderedLines);
             var escapedNew = newLines.map(function(line) { return esc(line); });
             this._escapedCache += escapedNew.join('\n') + (newLines.length > 0 ? '\n' : '');
             this._renderedLines = lines.length;
           }
 
-          if (this._isFirstLogLoad || el.innerHTML === '') {
+          if (needsFullRender || el.innerHTML === '') {
             this._isFirstLogLoad = false;
             if (lines.length < 200) {
               el.className = 'log-content typewriter';
@@ -317,7 +361,7 @@
               el.innerHTML = this._escapedCache;
             }
           } else {
-            var newLines = lines.slice(this._renderedLines - newLines.length, this._renderedLines);
+            var newLines = lines.slice(previousRenderedLines, this._renderedLines);
             if (newLines.length > 0) {
               var frag = document.createDocumentFragment();
               newLines.forEach(function(line) {
@@ -451,6 +495,22 @@
     function fmtTime(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-CN'); } catch(e) { return s; } }
     function fmtMem(kb) { if (!kb) return '-'; if (kb < 1024) return kb + ' KB'; return (kb / 1024).toFixed(1) + ' MB'; }
     function fmtCPU(ms) { if (!ms) return '-'; if (ms < 1000) return ms + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
+    function scriptLangFromName(name) {
+      var n = (name || '').toLowerCase();
+      if (n.endsWith('.sh') || n.endsWith('.bash') || n.endsWith('.zsh')) return 'bash';
+      if (n.endsWith('.py') || n.endsWith('.smk')) return 'python';
+      if (n.endsWith('.r')) return 'r';
+      if (n.endsWith('.rmd') || n.endsWith('.md')) return 'markdown';
+      if (n.endsWith('.js')) return 'javascript';
+      if (n.endsWith('.ts')) return 'typescript';
+      if (n.endsWith('.json')) return 'json';
+      if (n.endsWith('.yaml') || n.endsWith('.yml')) return 'yaml';
+      if (n.endsWith('.toml')) return 'ini';
+      if (n.endsWith('.cfg') || n.endsWith('.conf')) return 'ini';
+      if (n.endsWith('.pl')) return 'perl';
+      if (n.endsWith('.rb')) return 'ruby';
+      return 'plaintext';
+    }
     function formatDuration(ms) {
       if (ms < 1000) return ms + 'ms';
       var s = Math.floor(ms / 1000);

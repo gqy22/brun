@@ -1,4 +1,4 @@
-.PHONY: build test clean release release-all upx \
+.PHONY: build test clean release release-all upx FORCE \
 	release-linux-amd64 release-linux-arm64 \
 	release-darwin-arm64 release-darwin-amd64
 
@@ -14,6 +14,7 @@ TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 
 build:
 	@mkdir -p $(BINDIR)
+	@rm -f $(BINDIR)/$(BINARY)
 	CGO_ENABLED=0 go build -o $(BINDIR)/$(BINARY) $(LDFLAGS) $(SRC)
 
 test:
@@ -46,10 +47,14 @@ release-all: $(TARGETS)
 	@echo "=== All releases ==="
 	@ls -lh dist/
 
-dist/$(BINARY)-%-amd64:
+dist/$(BINARY)-%-amd64: FORCE
+	@mkdir -p dist
+	@rm -f $@
 	CGO_ENABLED=0 GOOS=$* GOARCH=amd64 go build -o $@ $(LDFLAGS) $(SRC)
 
-dist/$(BINARY)-%-arm64:
+dist/$(BINARY)-%-arm64: FORCE
+	@mkdir -p dist
+	@rm -f $@
 	CGO_ENABLED=0 GOOS=$* GOARCH=arm64 go build -o $@ $(LDFLAGS) $(SRC)
 
 release-linux-amd64: dist/$(BINARY)-linux-amd64
