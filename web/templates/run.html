@@ -41,9 +41,15 @@
       <aside class="detail-sidebar">
         <div :class="'sidebar-card status-'+(detail.status||'unknown')">
           <!-- 加载中 -->
-          <template x-if="!detail.id"><p class="text-muted">加载中...</p></template>
+          <template x-if="loading"><p class="text-muted">加载中...</p></template>
+          <template x-if="loadError">
+            <div class="detail-error">
+              <div class="detail-error-title" x-text="loadError"></div>
+              <button class="btn btn-sm btn-outline" @click="loadDetail()">重试</button>
+            </div>
+          </template>
 
-          <template x-if="detail.id">
+          <template x-if="detail.id && !loadError">
             <div>
               <div class="run-summary">
                 <div class="run-summary-top">
@@ -141,16 +147,19 @@
             <button class="log-tab" x-show="scriptContent" :class="{active:tab==='script'}"
                     @click="switchTab('script')" data-tab="script">Script</button>
             <button class="log-tab" :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
-            <button class="log-tab" :class="{active:tab==='stderr'}" @click="switchTab('stderr')">stderr</button>
+            <button class="log-tab" :class="{active:tab==='stderr', 'has-content': stderrSize > 0}" @click="switchTab('stderr')">stderr</button>
             <div class="log-toolbar" x-show="tab!=='script'">
               <span class="log-meta" x-text="logMeta"></span>
               <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value=""
                      @change="loadLog()">
               <input type="text" id="log-search" placeholder="搜索日志..." class="input-sm" style="width:180px"
                      @input.debounce.200ms="renderLog()">
+              <span class="log-match-count" x-show="searchQuery" x-text="searchMatchCount + ' matches'"></span>
               <label class="checkbox-inline">
                 <input type="checkbox" id="auto-refresh" checked @change="onAutoRefreshChange($event)"> auto-refresh
               </label>
+              <button class="btn btn-sm btn-outline" x-show="searchQuery" @click="clearLogSearch()">清空</button>
+              <button class="btn btn-sm btn-outline" @click="scrollLogBottom()">到底部</button>
             </div>
             <div class="log-toolbar" x-show="tab==='script'">
               <span class="script-meta" x-text="scriptMeta"></span>
@@ -214,6 +223,8 @@
       var RUN_ID = window.location.pathname.split('/').pop();
       return {
         detail: {},
+        loading: true,
+        loadError: '',
         tab: 'stdout',
         currentStream: 'stdout',
         scriptContent: '',
@@ -226,6 +237,9 @@
         _renderedLines: 0,
         _isFirstLogLoad: true,
         _escapedCache: '',
+        searchQuery: '',
+        searchMatchCount: 0,
+        stderrSize: 0,
         durationTimer: null,
         displayDuration: '-',
 
@@ -313,9 +327,16 @@
         },
 
         async loadDetail() {
+          this.loading = true;
+          this.loadError = '';
           try {
             var r = await fetch('/api/runs/' + RUN_ID);
-            if (r.status === 404) { this.detail = { status: 'notfound' }; return; }
+            if (r.status === 404) {
+              this.detail = {};
+              this.loadError = '运行记录不存在';
+              return;
+            }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
             var d = await r.json();
             document.title = (d.name || d.id) + ' - brun';
             this.detail = d;
@@ -328,7 +349,13 @@
             this.stopDurationTimer();
             if (d.status === 'running' && d.started_at) this.startDurationTimer(d.started_at);
             if (d.status === 'running') this.connectSSE();
-          } catch (e) { console.error('loadDetail error:', e); }
+            this.loadStderrSize();
+          } catch (e) {
+            console.error('loadDetail error:', e);
+            this.loadError = '详情加载失败';
+          } finally {
+            this.loading = false;
+          }
         },
 
         async loadArtifacts() {
@@ -350,13 +377,26 @@
           this.renderLog();
         },
 
+        async loadStderrSize() {
+          try {
+            var d = await fetch('/api/runs/' + RUN_ID + '/logs?stream=stderr&tail=1').then(function(r) { return r.json(); });
+            this.stderrSize = d.size || 0;
+          } catch (e) {
+            this.stderrSize = 0;
+          }
+        },
+
         renderLog() {
           var el = document.getElementById('log-content');
           var q = document.getElementById('log-search').value;
+          this.searchQuery = q;
+          this.searchMatchCount = 0;
 
           if (q) {
             var content = esc(this._logContent);
             var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            var matches = content.match(re);
+            this.searchMatchCount = matches ? matches.length : 0;
             content = content.replace(re, function(m) { return '<mark>' + m + '</mark>'; });
             el.className = 'log-content';
             el.innerHTML = content || '<span class="text-muted">(空)</span>';
@@ -406,6 +446,19 @@
             }
           }
           this.autoScroll(el);
+        },
+
+        clearLogSearch() {
+          var el = document.getElementById('log-search');
+          el.value = '';
+          this.searchQuery = '';
+          this.searchMatchCount = 0;
+          this.renderLog();
+        },
+
+        scrollLogBottom() {
+          var el = document.getElementById('log-content');
+          if (el) el.scrollTop = el.scrollHeight;
         },
 
         autoScroll(el) {
