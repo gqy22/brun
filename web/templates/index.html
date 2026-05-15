@@ -13,8 +13,23 @@
   </nav>
 
   <main class="container dashboard-page" x-data="dashboard()" x-init="init()">
+    <div class="dashboard-header">
+      <div>
+        <div class="dashboard-title">Runs</div>
+        <div class="dashboard-subtitle">跟踪命令、日志、耗时和输出文件。</div>
+      </div>
+      <div class="dashboard-stats" x-show="stats.total !== null">
+        <div class="dashboard-stat"><span x-text="stats.total"></span><label>总运行</label></div>
+        <div class="dashboard-stat"><span x-text="stats.running"></span><label>运行中</label></div>
+        <div class="dashboard-stat"><span x-text="stats.failed"></span><label>失败</label></div>
+        <div class="dashboard-stat"><span x-text="stats.rate+'%'"></span><label>成功率</label></div>
+      </div>
+    </div>
+
     <!-- 过滤栏 -->
     <div class="filter-bar">
+      <input type="text" x-model="filters.search" @input.debounce.300ms="loadRuns()"
+             placeholder="搜索命令、名称或项目..." class="filter-input filter-input-main">
       <select x-model="filters.project" @change="loadRuns()">
         <option value="">所有项目</option>
         <template x-for="p in projects"><option :value="p" x-text="p"></option></template>
@@ -29,8 +44,7 @@
         <option value="">所有标签</option>
         <template x-for="t in tags"><option :value="t" x-text="t"></option></template>
       </select>
-      <input type="text" x-model="filters.search" @input.debounce.300ms="loadRuns()"
-             placeholder="搜索命令..." class="filter-input">
+      <button x-show="activeFilterCount > 0" @click="clearFilters()" class="btn btn-sm btn-subtle">清除筛选</button>
       <button @click="doRefresh()" class="btn btn-sm btn-outline"
               :class="{'btn-spinning': refreshing}">
         <svg class="btn-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -41,26 +55,39 @@
     <!-- 桌面端：表格 -->
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Run ID</th><th>Name</th><th>Project</th><th>Status</th><th>Duration</th><th>Command</th><th>Started</th><th></th></tr></thead>
+        <thead><tr><th>Run</th><th>Status</th><th>Duration</th><th>Command</th><th>Started</th><th></th></tr></thead>
         <tbody>
           <!-- 加载中 / 空状态 -->
           <template x-if="loading">
-            <tr><td colspan="8" class="text-center text-muted">加载中...</td></tr>
+            <tr><td colspan="6" class="text-center text-muted">加载中...</td></tr>
           </template>
           <template x-if="!loading && runs.length === 0">
-            <tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div><div class="empty-title">暂无运行记录</div><div class="empty-desc">运行你的第一个任务，这里会显示执行结果</div></div></td></tr>
+            <tr><td colspan="6"><div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div><div class="empty-title" x-text="activeFilterCount > 0 ? '没有匹配的运行记录' : '暂无运行记录'"></div><div class="empty-desc" x-text="activeFilterCount > 0 ? '调整搜索或清除筛选后再试。' : '运行你的第一个任务，这里会显示执行结果。'"></div></div></td></tr>
           </template>
           <!-- 数据行 -->
           <template x-for="(r, i) in runs" :key="r.id">
-            <tr class="row-clickable animate-in" :style="'animation-delay:' + (i * 35) + 'ms'"
+            <tr :class="'row-clickable animate-in row-status-'+r.status" :style="'animation-delay:' + (i * 35) + 'ms'"
                 @click="location.href='/run/'+r.id">
-              <td><code class="run-id" x-text="r.id"></code></td>
-              <td><span x-text="r.name || '-'"></span></td>
-              <td><span x-text="r.project || '-'"></span></td>
+              <td>
+                <div class="run-cell">
+                  <div class="run-cell-title" x-text="r.name || r.id"></div>
+                  <div class="run-cell-meta">
+                    <code class="run-id" x-text="r.id"></code>
+                    <span x-text="r.project || '-'"></span>
+                  </div>
+                </div>
+              </td>
               <td><span :class="'badge badge-'+r.status" x-text="r.status"></span></td>
               <td class="duration-cell" x-text="getDuration(r)"></td>
-              <td class="cmd-cell" :title="r.command" x-text="truncate(r.command, 60)"></td>
-              <td class="text-muted" style="font-size:13px" x-text="fmtTime(r.started_at)"></td>
+              <td>
+                <div class="cmd-cell cmd-cell-strong" :title="r.command" x-text="truncate(r.command, 96)"></div>
+              </td>
+              <td>
+                <div class="started-cell">
+                  <span x-text="fmtTime(r.started_at)"></span>
+                  <small x-text="timeAgo(r.started_at)"></small>
+                </div>
+              </td>
               <td @click.stop style="white-space:nowrap">
                 <button class="btn btn-sm btn-delete-row" @click="deleteRun(r.id, $event)" title="删除此记录">删除</button>
               </td>
@@ -73,9 +100,12 @@
     <!-- 移动端：卡片列表 -->
     <div class="run-card-list">
       <template x-for="r in runs" :key="r.id">
-        <div class="run-card animate-in" @click="location.href='/run/'+r.id">
+        <div :class="'run-card animate-in row-status-'+r.status" @click="location.href='/run/'+r.id">
           <div class="run-card-header">
-            <span class="run-card-id" x-text="r.id"></span>
+            <div>
+              <div class="run-card-title" x-text="r.name || truncate(r.command, 48)"></div>
+              <span class="run-card-id" x-text="r.id"></span>
+            </div>
             <span :class="'badge badge-'+r.status" x-text="r.status"></span>
           </div>
           <div class="run-card-body">
@@ -83,8 +113,8 @@
               <div class="run-card-row"><span class="label">Name</span><span class="value" x-text="r.name"></span></div>
             </template>
             <div class="run-card-row"><span class="label">Project</span><span class="value" x-text="r.project || '-'"></span></div>
-            <div class="run-card-row"><span class="label">Duration</span><span x-text="getDuration(r)"></span></div>
-            <div class="run-card-cmd" :title="r.command" x-text="truncate(r.command, 60)"></div>
+            <div class="run-card-row"><span class="label">Duration</span><span class="duration-cell" x-text="getDuration(r)"></span></div>
+            <div class="run-card-cmd" :title="r.command" x-text="truncate(r.command, 96)"></div>
           </div>
           <div class="run-card-footer">
             <span class="run-card-time" x-text="fmtTime(r.started_at)"></span>
@@ -119,7 +149,7 @@
         projects: [],
         tags: [],
         runs: [],
-        stats: { total: null, rate: 0, todayCount: 0 },
+        stats: { total: null, rate: 0, todayCount: 0, running: 0, failed: 0 },
         _runningTimers: {},
         _autoRefreshTimer: null,
 
@@ -127,6 +157,13 @@
           await this.loadFilters();
           await this.loadRuns();
           this.loadFooterStats();
+        },
+
+        get activeFilterCount() {
+          return (this.filters.project ? 1 : 0) +
+            (this.filters.status ? 1 : 0) +
+            (this.filters.tag ? 1 : 0) +
+            (this.filters.search ? 1 : 0);
         },
 
         async loadFilters() {
@@ -165,6 +202,11 @@
           });
         },
 
+        clearFilters() {
+          this.filters = { project: '', status: '', tag: '', search: '' };
+          this.loadRuns();
+        },
+
         manageRunningTimers() {
           var seen = {};
           this.runs.forEach(function(r) {
@@ -201,10 +243,14 @@
             if (!Array.isArray(runs)) return;
             var total = runs.length;
             var success = runs.filter(function(r) { return r.status === 'success'; }).length;
+            var running = runs.filter(function(r) { return r.status === 'running'; }).length;
+            var failed = runs.filter(function(r) { return r.status === 'failed'; }).length;
             var today = new Date().toISOString().slice(0, 10);
             this.stats = {
               total: total,
               rate: total > 0 ? Math.round(success / total * 100) : 0,
+              running: running,
+              failed: failed,
               todayCount: runs.filter(function(r) { return r.started_at && r.started_at.startsWith(today); }).length
             };
           } catch (e) { /* 静默 */ }
