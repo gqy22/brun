@@ -998,6 +998,28 @@ code {
   font-size: 13px;
   color: var(--text-muted);
 }
+.artifact-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.artifact-copy-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.artifact-copy-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
 .empty-inline {
   padding: 30px 18px;
   text-align: center;
@@ -1377,7 +1399,25 @@ code {
   .table { font-size: 13.5px; }
   .table th, .table td { padding: 11px 14px; font-size: 13.5px; }
   .cmd-cell { max-width: 140px; }
-  .log-toolbar { display: none; }
+  .log-tabs { align-items: flex-start; padding: 0 10px; }
+  .log-tab { padding: 11px 12px; font-size: 13px; }
+  .log-toolbar {
+    width: 100%;
+    margin-left: 0;
+    padding: 8px 0 10px;
+    flex-wrap: wrap;
+  }
+  .log-toolbar .input-sm {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  .log-meta,
+  .log-match-count,
+  .script-meta {
+    min-width: 0;
+    max-width: 100%;
+    text-align: left;
+  }
   .log-content { font-size: 12.5px; padding: 14px; }
   .script-line-numbers { font-size: 12.5px; padding: 14px 10px 14px 12px; }
   .script-content code.hljs,
@@ -1392,4 +1432,5 @@ code {
   .summary-metrics { grid-template-columns: 1fr 1fr; }
   .detail-sidebar { width: 100%; }
   .artifact-path { max-width: 100%; }
+  .artifact-path-row { flex-wrap: wrap; }
 }

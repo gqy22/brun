@@ -199,7 +199,10 @@
                     <td><span :class="'badge badge-'+a.status" x-text="a.status"></span></td>
                     <td x-text="a.size"></td>
                     <td>
-                      <div class="artifact-path" x-text="a.path"></div>
+                      <div class="artifact-path-row">
+                        <div class="artifact-path" :title="a.path" x-text="a.path"></div>
+                        <button class="artifact-copy-btn" @click.stop="copyText(a.path, '路径已复制')">复制</button>
+                      </div>
                     </td>
                   </tr>
                 </template>
@@ -531,8 +534,13 @@
 
         copyScript() {
           if (!this.scriptContent) return;
-          navigator.clipboard.writeText(this.scriptContent).then(() => {
-            toast('success', '脚本已复制到剪贴板');
+          this.copyText(this.scriptContent, '脚本已复制到剪贴板');
+        },
+
+        copyText(text, successMessage) {
+          if (!text) return;
+          navigator.clipboard.writeText(text).then(() => {
+            toast('success', successMessage || '已复制到剪贴板');
           }).catch(() => toast('error', '复制失败'));
         },
 
