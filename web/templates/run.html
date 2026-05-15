@@ -136,7 +136,7 @@
 
       <!-- 右侧：统一标签页 -->
       <div class="detail-main">
-        <div class="log-viewer">
+        <div class="log-viewer" :class="{'log-viewer-code': tab==='script'}">
           <div class="log-tabs">
             <button class="log-tab" x-show="scriptContent" :class="{active:tab==='script'}"
                     @click="switchTab('script')" data-tab="script">Script</button>

@@ -422,15 +422,13 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		syscall.Kill(pid, syscall.SIGKILL)
-	}
-
-	// 等待进程退出后采集资源数据
-	time.Sleep(500 * time.Millisecond)
 	pss, cst := readProcStats(pid)
 	if pss > 0 || cst > 0 {
 		s.store.UpdateRunResources(id, pss, cst)
+	}
+
+	if err := killProcessGroup(pid, syscall.SIGTERM); err != nil {
+		syscall.Kill(pid, syscall.SIGTERM)
 	}
 	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
 }
