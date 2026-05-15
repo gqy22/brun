@@ -90,14 +90,6 @@
                   <button class="cmd-copy-btn" @click="copyCmd()" title="复制命令">复制</button>
                 </div>
               </div>
-              <div class="side-info">
-                <label>Project</label>
-                <div class="side-value"><span x-text="detail.project || '-'"></span></div>
-              </div>
-              <div class="side-info">
-                <label>CWD</label>
-                <div class="side-value side-path" :title="detail.cwd" x-text="detail.cwd || '-'"></div>
-              </div>
 
               <div class="side-group-title">时间信息</div>
               <div class="side-info">
@@ -112,27 +104,29 @@
                 <div class="side-value" x-text="fmtTime(detail.ended_at) || '-'"></div>
               </div>
 
-              <template x-if="detail.git_commit">
+              <template x-if="detail.git_commit || (detail.tags && detail.tags.length) || detail.note">
                 <div>
-                  <div class="side-group-title">版本信息</div>
-                  <div class="side-info">
-                    <label>Git</label>
-                    <div class="side-value"><code x-text="detail.git_commit.substring(0,8)+(detail.git_dirty?' (dirty)':'')"></code></div>
-                  </div>
-                </div>
-              </template>
-              <template x-if="detail.tags && detail.tags.length">
-                <div class="side-info">
-                  <label>Tags</label>
-                  <div class="side-value">
-                    <template x-for="t in detail.tags"><span class="tag" x-text="t"></span>&nbsp;</template>
-                  </div>
-                </div>
-              </template>
-              <template x-if="detail.note">
-                <div class="side-info">
-                  <label>Note</label>
-                  <div class="side-value" x-text="detail.note"></div>
+                  <div class="side-group-title">附加信息</div>
+                  <template x-if="detail.git_commit">
+                    <div class="side-info">
+                      <label>Git</label>
+                      <div class="side-value"><code x-text="detail.git_commit.substring(0,8)+(detail.git_dirty?' (dirty)':'')"></code></div>
+                    </div>
+                  </template>
+                  <template x-if="detail.tags && detail.tags.length">
+                    <div class="side-info">
+                      <label>Tags</label>
+                      <div class="side-value">
+                        <template x-for="t in detail.tags"><span class="tag" x-text="t"></span>&nbsp;</template>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="detail.note">
+                    <div class="side-info side-note">
+                      <label>Note</label>
+                      <div class="side-value" x-text="detail.note"></div>
+                    </div>
+                  </template>
                 </div>
               </template>
             </div>
@@ -199,10 +193,14 @@
                 </template>
                 <template x-for="a in artifacts" :key="a.path">
                   <tr>
-                    <td x-text="a.kind"></td>
+                    <td>
+                      <div class="artifact-kind" x-text="a.kind"></div>
+                    </td>
                     <td><span :class="'badge badge-'+a.status" x-text="a.status"></span></td>
                     <td x-text="a.size"></td>
-                    <td x-text="a.path"></td>
+                    <td>
+                      <div class="artifact-path" x-text="a.path"></div>
+                    </td>
                   </tr>
                 </template>
               </tbody>
