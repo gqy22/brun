@@ -82,6 +82,7 @@ func main() {
 		runCmd(),
 		listCmd(),
 		showCmd(),
+		scriptCmd(),
 		logsCmd(),
 		outputsCmd(),
 		tagCmd(),
@@ -644,6 +645,52 @@ func showCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// --- script ---
+
+func scriptCmd() *cobra.Command {
+	var pathOnly bool
+
+	c := &cobra.Command{
+		Use:   "script <run_id|latest>",
+		Short: "查看运行时保存的脚本快照",
+		Example: `  brun script latest
+  brun script 20260522-153012-a8f3c2
+  brun script latest --path`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			runID, isLatest := cmd.ResolveRunID(args[0])
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			var r *internal.Run
+			if isLatest {
+				r, err = store.GetLatestRun()
+			} else {
+				r, err = store.GetRun(runID)
+			}
+			if err != nil {
+				return err
+			}
+
+			snapshot, err := cmd.ReadScriptSnapshot(r.RunDir)
+			if err != nil {
+				return err
+			}
+			if pathOnly {
+				fmt.Fprintln(c.OutOrStdout(), snapshot.Path)
+				return nil
+			}
+			fmt.Fprint(c.OutOrStdout(), snapshot.Content)
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&pathOnly, "path", false, "只输出脚本快照路径")
+	return c
 }
 
 // --- logs ---

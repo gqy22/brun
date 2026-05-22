@@ -28,7 +28,7 @@ type testSrv struct {
 
 func newTestServer(t *testing.T) (*testSrv, string) {
 	t.Helper()
-	store, err := internal.NewStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := internal.NewStore(filepath.Join(fastTempDir(t), "test.db"))
 	if err != nil {
 		t.Fatalf("创建测试 store 失败: %v", err)
 	}
@@ -61,6 +61,20 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	ts := &testSrv{ws, mux, srv, ln.Addr().String()}
 	t.Cleanup(func() { srv.Close() })
 	return ts, runID
+}
+
+func fastTempDir(t *testing.T) string {
+	t.Helper()
+	base := "/dev/shm"
+	if info, err := os.Stat(base); err != nil || !info.IsDir() {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "brun-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 // doReq 通过 mux 路由请求，确保 PathValue 正确填充（用于普通 API 测试）

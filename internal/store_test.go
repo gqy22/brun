@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -223,11 +224,25 @@ func TestStore_GetLatestRun(t *testing.T) {
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := NewStore(t.TempDir() + "/test.db")
+	s, err := NewStore(filepath.Join(fastTempDir(t), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func fastTempDir(t *testing.T) string {
+	t.Helper()
+	base := "/dev/shm"
+	if info, err := os.Stat(base); err != nil || !info.IsDir() {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "brun-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 func runID(i int) string {

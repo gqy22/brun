@@ -55,6 +55,7 @@ brun list -s "bwa"                # 搜哪个 run 用了 bwa
 brun show latest                   # 最新一次详情
 brun logs latest --tail 100        # 看最后 100 行日志
 brun outputs latest                # 自动检测到的输出文件
+brun script latest                 # 查看运行时保存的脚本快照
 ```
 
 ### 前台运行（调试时用）
@@ -155,6 +156,7 @@ http://192.168.1.x:9313
 | `brun run -f -- <cmd>` | 前台运行 | `brun run -f -n job1 -- cmd` |
 | `brun list` | 列出运行历史 | `brun list -p proj -s "bwa" --since 1d` |
 | `brun show <id\|latest>` | 查看详情 | `brun show latest` |
+| `brun script <id\|latest>` | 查看脚本快照 | `brun script latest` |
 | `brun logs <id\|latest>` | 查看日志 | `brun logs latest --tail 50 --stderr` |
 | `brun outputs <id\|latest>` | 查看输出文件 | `brun outputs latest` |
 | `brun tag <id> TAG...` | 添加标签 | `brun tag latest sample:S1 production` |
@@ -235,6 +237,7 @@ brun list -p wgs -s "mem" --since 3d    # 组合使用
         └── <run_id>/
             ├── metadata.yaml     # 结构化元数据
             ├── command.sh        # 完整命令
+            ├── script.<name>      # 输入脚本快照（如 script.04.sh）
             ├── stdout.log        # 标准输出
             ├── stderr.log        # 错误输出
             └── env.txt           # 环境摘要

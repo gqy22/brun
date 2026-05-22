@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,6 +40,40 @@ type ArtifactRow struct {
 	Status string
 	Size   string
 	Path   string
+}
+
+type ScriptSnapshot struct {
+	Name    string
+	Path    string
+	Content string
+}
+
+// ReadScriptSnapshot reads the saved input script snapshot from a run directory.
+// Binary files and files larger than 2MB are ignored.
+func ReadScriptSnapshot(runDir string) (ScriptSnapshot, error) {
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		return ScriptSnapshot{}, fmt.Errorf("读取 run 目录失败: %w", err)
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "script.") {
+			continue
+		}
+		path := filepath.Join(runDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ScriptSnapshot{}, fmt.Errorf("读取脚本快照失败: %w", err)
+		}
+		if len(data) > 2*1024*1024 || bytes.Contains(data, []byte{0}) {
+			continue
+		}
+		return ScriptSnapshot{
+			Name:    strings.TrimPrefix(e.Name(), "script."),
+			Path:    path,
+			Content: string(data),
+		}, nil
+	}
+	return ScriptSnapshot{}, fmt.Errorf("未找到该 run 的脚本快照")
 }
 
 func FormatRunList(runs []RunRow) string {

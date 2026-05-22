@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -133,5 +135,37 @@ func TestDurationString(t *testing.T) {
 		if !strings.Contains(got, tt.contains) {
 			t.Errorf("DurationString(%d) = %q, want contain %q", tt.ms, got, tt.contains)
 		}
+	}
+}
+
+func TestReadScriptSnapshot(t *testing.T) {
+	runDir := t.TempDir()
+	content := "echo hello\n"
+	if err := os.WriteFile(filepath.Join(runDir, "script.04.sh"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := ReadScriptSnapshot(runDir)
+	if err != nil {
+		t.Fatalf("ReadScriptSnapshot() error = %v", err)
+	}
+	if snapshot.Name != "04.sh" {
+		t.Errorf("Name = %q, want 04.sh", snapshot.Name)
+	}
+	if snapshot.Content != content {
+		t.Errorf("Content = %q, want %q", snapshot.Content, content)
+	}
+	if !strings.HasSuffix(snapshot.Path, filepath.Join(runDir, "script.04.sh")) {
+		t.Errorf("Path = %q, want script.04.sh under run dir", snapshot.Path)
+	}
+}
+
+func TestReadScriptSnapshot_Missing(t *testing.T) {
+	_, err := ReadScriptSnapshot(t.TempDir())
+	if err == nil {
+		t.Fatal("ReadScriptSnapshot() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "未找到") {
+		t.Errorf("error = %q, want contain 未找到", err.Error())
 	}
 }
