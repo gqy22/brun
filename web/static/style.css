@@ -344,6 +344,14 @@ body {
 .badge-failed::before { background: #ef4444; }
 .badge-running { background: var(--running-bg); color: #0e7490; }
 .badge-running::before { background: var(--running); animation: dotPulse 1.5s infinite; }
+.badge-danger { background: rgba(239,68,68,0.12); color: #ef4444; }
+.badge-danger::before { background: #ef4444; }
+.badge-warning { background: rgba(245,158,11,0.12); color: #d97706; }
+.badge-warning::before { background: #f59e0b; }
+.badge-dead { background: rgba(148,163,184,0.12); color: #64748b; }
+.badge-dead::before { background: #94a3b8; }
+.badge-default { background: rgba(148,163,184,0.08); color: #94a3b8; }
+.badge-default::before { background: #94a3b8; }
 @keyframes dotPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: .4; transform: scale(.7); }
@@ -907,6 +915,57 @@ code {
   color: inherit;
   padding: 0 2px;
   border-radius: 2px;
+}
+
+/* ===== Processes Table ===== */
+.processes-viewer {
+  padding: 0;
+}
+.processes-table {
+  width: 100%;
+  font-size: 13px;
+}
+.processes-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.processes-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  vertical-align: middle;
+}
+.processes-table tbody tr:hover {
+  background: rgba(255,255,255,.03);
+}
+.proc-pid code {
+  font-size: 12.5px;
+}
+.proc-cmd {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+}
+.proc-high-mem {
+  color: #ef4444;
+  font-weight: 600;
+}
+.proc-high-rss {
+  background: rgba(239,68,68,0.04);
+}
+.process-meta {
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .script-meta {

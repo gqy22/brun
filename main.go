@@ -635,6 +635,8 @@ func showCmd() *cobra.Command {
 				EndedAt:   r.EndedAt,
 				Duration:  cmd.DurationString(r.DurationMs),
 				ExitCode:  r.ExitCode,
+				PeakRSSKB: r.PeakRSSKB,
+				CPUTimeMs: r.CPUTimeMs,
 				GitRepo:   r.GitRepo,
 				GitCommit: r.GitCommit,
 				GitDirty:  r.GitDirty,

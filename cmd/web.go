@@ -49,6 +49,7 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("GET /api/runs/{id}/logs", s.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/logs/stream", s.apiStreamLogs)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.apiGetArtifacts)
+	mux.HandleFunc("GET /api/runs/{id}/processes", s.apiGetProcesses)
 	mux.HandleFunc("POST /api/runs/{id}/rerun", s.apiRerun)
 	mux.HandleFunc("POST /api/runs/{id}/kill", s.apiKill)
 	mux.HandleFunc("DELETE /api/runs/{id}", s.apiDeleteRun)
@@ -330,6 +331,36 @@ func (s *WebServer) apiGetArtifacts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jsonResponse(w, rows)
+}
+
+func (s *WebServer) apiGetProcesses(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := s.store.GetRun(id)
+	if err != nil {
+		httpError(w, err.Error(), 404)
+		return
+	}
+	if run.Status != "running" {
+		jsonResponse(w, map[string]any{"processes": []ProcessInfo{}, "status": run.Status})
+		return
+	}
+
+	pid, ok := s.readPID(run.RunDir)
+	if !ok || pid <= 0 {
+		jsonResponse(w, map[string]any{"processes": []ProcessInfo{}})
+		return
+	}
+
+	procs := ListProcessGroup(pid)
+	totalRSS := int64(0)
+	for _, p := range procs {
+		totalRSS += p.RSSKB
+	}
+	jsonResponse(w, map[string]any{
+		"processes": procs,
+		"total_rss_kb": totalRSS,
+		"count":       len(procs),
+	})
 }
 
 func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {

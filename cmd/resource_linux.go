@@ -18,9 +18,29 @@ type ResourceUsage struct {
 	CPUTimeMs int64
 }
 
+type ProcessInfo struct {
+	PID     int    `json:"pid"`
+	PPID    int    `json:"ppid"`
+	Comm    string `json:"comm"`
+	State   string `json:"state"`
+	RSSKB   int64  `json:"rss_kb"`
+	CPUTime int64  `json:"cpu_time_ms"`
+	Cmdline string `json:"cmdline"`
+}
+
 type procStat struct {
 	pid        int
 	pgrp       int
+	utimeTicks uint64
+	stimeTicks uint64
+}
+
+type procStatFull struct {
+	pid        int
+	ppid       int
+	pgrp       int
+	state      string
+	comm       string
 	utimeTicks uint64
 	stimeTicks uint64
 }
@@ -117,6 +137,65 @@ func sampleProcessGroup(pgid int) ResourceUsage {
 	return sampleProcessGroupFromProc("/proc", pgid, clockTicksPerSecond())
 }
 
+func ListProcessGroup(pgid int) []ProcessInfo {
+	return listProcessGroupFromProc("/proc", pgid, clockTicksPerSecond())
+}
+
+func listProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64) []ProcessInfo {
+	if pgid <= 0 || ticksPerSecond <= 0 {
+		return nil
+	}
+
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return nil
+	}
+
+	var procs []ProcessInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+
+		dir := filepath.Join(procRoot, entry.Name())
+		statData, err := os.ReadFile(filepath.Join(dir, "stat"))
+		if err != nil {
+			continue
+		}
+		ps, err := parseProcStatFull(statData)
+		if err != nil || ps.pgrp != pgid {
+			continue
+		}
+
+		var rssKB int64
+		if statusData, err := os.ReadFile(filepath.Join(dir, "status")); err == nil {
+			rssKB = readStatusValueKB(statusData, "VmRSS:")
+		}
+
+		cmdline := ""
+		if clData, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+			cmdline = strings.ReplaceAll(string(clData), "\x00", " ")
+			cmdline = strings.TrimSpace(cmdline)
+		}
+
+		cpuMs := int64(ps.utimeTicks+ps.stimeTicks) * 1000 / ticksPerSecond
+
+		procs = append(procs, ProcessInfo{
+			PID:     ps.pid,
+			PPID:    ps.ppid,
+			Comm:    ps.comm,
+			State:   ps.state,
+			RSSKB:   rssKB,
+			CPUTime: cpuMs,
+			Cmdline: cmdline,
+		})
+	}
+	return procs
+}
+
 func sampleProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64) ResourceUsage {
 	if pgid <= 0 || ticksPerSecond <= 0 {
 		return ResourceUsage{}
@@ -192,6 +271,50 @@ func parseProcStat(data []byte) (procStat, error) {
 	return procStat{
 		pid:        pid,
 		pgrp:       pgrp,
+		utimeTicks: utime,
+		stimeTicks: stime,
+	}, nil
+}
+
+func parseProcStatFull(data []byte) (procStatFull, error) {
+	text := strings.TrimSpace(string(data))
+	open := strings.IndexByte(text, '(')
+	close := strings.LastIndexByte(text, ')')
+	if open < 1 || close <= open {
+		return procStatFull{}, errors.New("invalid proc stat comm")
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(text[:open]))
+	if err != nil {
+		return procStatFull{}, err
+	}
+	comm := text[open+1 : close]
+
+	fields := strings.Fields(strings.TrimSpace(text[close+1:]))
+	if len(fields) <= 12 {
+		return procStatFull{}, errors.New("invalid proc stat fields")
+	}
+	state := fields[0]
+	ppid, _ := strconv.Atoi(fields[1])
+	pgrp, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return procStatFull{}, err
+	}
+	utime, err := strconv.ParseUint(fields[11], 10, 64)
+	if err != nil {
+		return procStatFull{}, err
+	}
+	stime, err := strconv.ParseUint(fields[12], 10, 64)
+	if err != nil {
+		return procStatFull{}, err
+	}
+
+	return procStatFull{
+		pid:        pid,
+		ppid:       ppid,
+		pgrp:       pgrp,
+		state:      state,
+		comm:       comm,
 		utimeTicks: utime,
 		stimeTicks: stime,
 	}, nil

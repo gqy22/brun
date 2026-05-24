@@ -34,24 +34,41 @@ func TestFormatRunList_Empty(t *testing.T) {
 
 func TestFormatShowOutput(t *testing.T) {
 	run := &RunDetail{
-		ID:       "20260513-153012-a8f3c2",
-		Name:     "test-run",
-		Project:  "rnaseq",
-		Status:   "success",
-		Command:  "python script.py --sample S1",
-		CWD:      "/home/user/project",
-		Duration: "2m31s",
-		ExitCode: 0,
-		Tags:     []string{"rnaseq"},
-		Note:     "test note",
+		ID:        "20260513-153012-a8f3c2",
+		Name:      "test-run",
+		Project:   "rnaseq",
+		Status:    "success",
+		Command:   "python script.py --sample S1",
+		CWD:       "/home/user/project",
+		Duration:  "2m31s",
+		ExitCode:  0,
+		PeakRSSKB: 102400,
+		CPUTimeMs: 15000,
+		Tags:      []string{"rnaseq"},
+		Note:      "test note",
 	}
 
 	output := FormatShow(run)
-	checks := []string{"20260513-153012-a8f3c2", "test-run", "rnaseq", "success", "python script.py", "rnaseq", "test note"}
+	checks := []string{"20260513-153012-a8f3c2", "test-run", "rnaseq", "success", "python script.py", "rnaseq", "test note", "100.0 MB", "15.00s"}
 	for _, c := range checks {
 		if !strings.Contains(output, c) {
 			t.Errorf("show output missing %q", c)
 		}
+	}
+}
+
+func TestFormatShowOutput_NoResources(t *testing.T) {
+	run := &RunDetail{
+		ID: "r1", Name: "old", Project: "p", Status: "success",
+		Command: "echo hi", ExitCode: 0,
+	}
+
+	output := FormatShow(run)
+	if strings.Contains(output, "Memory:") {
+		t.Error("should not show Memory when value is 0")
+	}
+	if strings.Contains(output, "CPU Time:") {
+		t.Error("should not show CPU Time when value is 0")
 	}
 }
 

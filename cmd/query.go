@@ -28,6 +28,8 @@ type RunDetail struct {
 	EndedAt   string
 	Duration  string
 	ExitCode  int
+	PeakRSSKB int64
+	CPUTimeMs int64
 	GitRepo   string
 	GitCommit string
 	GitDirty  bool
@@ -123,6 +125,14 @@ func FormatShow(r *RunDetail) string {
 	if r.Duration != "" {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Duration:"), r.Duration)
 	}
+	if r.PeakRSSKB > 0 || r.CPUTimeMs > 0 {
+		if r.PeakRSSKB > 0 {
+			fmt.Fprintf(&b, "%s  %s\n", Bold("Memory:"), fmtMem(r.PeakRSSKB))
+		}
+		if r.CPUTimeMs > 0 {
+			fmt.Fprintf(&b, "%s  %s\n", Bold("CPU Time:"), fmtCPU(r.CPUTimeMs))
+		}
+	}
 	fmt.Fprintf(&b, "%s  %d\n", Bold("Exit Code:"), r.ExitCode)
 	if r.GitRepo != "" {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Git Repo:"), Dim(r.GitRepo))
@@ -197,6 +207,24 @@ func TailLog(content string, n int) string {
 		return content
 	}
 	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+func fmtMem(kb int64) string {
+	switch {
+	case kb < 1024:
+		return fmt.Sprintf("%d KB", kb)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(kb)/1024)
+	}
+}
+
+func fmtCPU(ms int64) string {
+	switch {
+	case ms < 1000:
+		return fmt.Sprintf("%dms", ms)
+	default:
+		return fmt.Sprintf("%.2fs", float64(ms)/1000)
+	}
 }
 
 func DurationString(ms int64) string {

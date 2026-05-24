@@ -142,6 +142,8 @@
                     @click="switchTab('script')" data-tab="script">Script</button>
             <button class="log-tab" :class="{active:tab==='stdout'}" @click="switchTab('stdout')">stdout</button>
             <button class="log-tab" :class="{active:tab==='stderr', 'has-content': stderrSize > 0}" @click="switchTab('stderr')">stderr</button>
+            <button class="log-tab" :class="{active:tab==='processes'}" x-show="detail.status==='running'"
+                    @click="switchTab('processes')">Processes (<span x-text="processes.length"></span>)</button>
             <div class="log-toolbar" x-show="tab!=='script'">
               <span class="log-meta" x-text="logMeta"></span>
               <input type="number" id="log-tail" placeholder="tail 行数" class="input-sm" style="width:90px" value=""
@@ -159,6 +161,11 @@
               <span class="script-meta" x-text="scriptMeta"></span>
               <button class="btn btn-sm btn-outline" @click="copyScript()">复制脚本</button>
             </div>
+            <div class="log-toolbar" x-show="tab==='processes'">
+              <span class="process-meta" x-text="processes.length + ' processes'"></span>
+              <span x-show="totalProcessRSS > 0" style="margin-left:12px;color:var(--muted)">Total RSS: <strong x-text="fmtMem(totalProcessRSS)"></strong></span>
+              <button class="btn btn-sm btn-outline" @click="loadProcesses()" style="margin-left:auto">刷新</button>
+            </div>
           </div>
 
           <!-- Script 面板 -->
@@ -168,7 +175,35 @@
           </div>
 
           <!-- 日志面板 -->
-          <pre class="log-content" id="log-content" x-show="tab!=='script'"></pre>
+          <pre class="log-content" id="log-content" x-show="tab!=='script' && tab!=='processes'"></pre>
+
+          <!-- Processes 面板 -->
+          <div x-show="tab==='processes'" id="processes-panel" class="processes-viewer">
+            <template x-if="processes.length === 0">
+              <div class="empty-inline" style="padding:2rem">
+                <div class="empty-inline-title">无进程信息</div>
+                <div class="empty-inline-desc">任务可能已结束或进程组为空</div>
+              </div>
+            </template>
+            <template x-if="processes.length > 0">
+              <table class="table processes-table">
+                <thead><tr><th>PID</th><th>Command</th><th>State</th><th>CPU</th><th>RSS</th></tr></thead>
+                <tbody>
+                  <template x-for="p in processes" :key="p.pid">
+                    <tr :class="{'proc-high-rss': p.rss_kb > 100*1024}">
+                      <td class="proc-pid"><code x-text="p.pid"></code></td>
+                      <td class="proc-cmd">
+                        <span :title="p.cmdline" x-text="p.cmdline ? truncate(p.cmdline, 80) : p.comm"></span>
+                      </td>
+                      <td><span :class="'badge badge-'+stateBadgeClass(p.state)" x-text="p.state"></span></td>
+                      <td x-text="fmtCPU(p.cpu_time_ms)"></td>
+                      <td :class="{'proc-high-mem': p.rss_kb > 100*1024}" x-text="fmtMem(p.rss_kb)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+          </div>
         </div>
 
         <!-- 输出文件 -->
@@ -243,6 +278,10 @@
         stderrSize: 0,
         durationTimer: null,
         displayDuration: '-',
+        // --- 进程列表 ---
+        processes: [],
+        totalProcessRSS: 0,
+        processTimer: null,
 
         async init() {
           await this.loadDetail();
@@ -254,7 +293,12 @@
           this.tab = t;
           if (t === 'script') {
             this.disconnectSSE();
+            this.stopProcessTimer();
             this.renderScript();
+          } else if (t === 'processes') {
+            this.disconnectSSE();
+            this.loadProcesses();
+            if (this.detail.status === 'running') this.startProcessTimer();
           } else {
             this.currentStream = t;
             this.disconnectSSE();
@@ -523,6 +567,32 @@
 
         disconnectSSE() {
           if (this.logSource) { this.logSource.close(); this.logSource = null; }
+        },
+
+        // --- Processes ---
+        async loadProcesses() {
+          try {
+            var d = await fetch('/api/runs/' + RUN_ID + '/processes').then(function(r) { return r.json(); });
+            this.processes = d.processes || [];
+            this.totalProcessRSS = d.total_rss_kb || 0;
+          } catch(e) {
+            this.processes = [];
+          }
+        },
+
+        startProcessTimer() {
+          this.stopProcessTimer();
+          var self = this;
+          this.processTimer = setInterval(function() { self.loadProcesses(); }, 3000);
+        },
+
+        stopProcessTimer() {
+          if (this.processTimer) { clearInterval(this.processTimer); this.processTimer = null; }
+        },
+
+        stateBadgeClass(state) {
+          var map = {'R': 'danger', 'D': 'warning', 'S': 'default', 'T': 'warning', 'Z': 'warning', 'X': 'dead', 'x': 'dead'};
+          return map[state] || 'default';
         },
 
         copyCmd() {
