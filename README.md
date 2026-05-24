@@ -123,9 +123,9 @@ brun web --port 8080        # 自定义端口
 功能概览：
 
 - **Dashboard 首页**：所有运行记录表格视图，支持按项目/状态/标签/关键词过滤，底部统计总运行数/成功率/今日运行数，running 任务自动刷新
-- **任务详情页**：左右分栏布局 — 左侧信息面板（状态/耗时/资源消耗/命令/Git/时间），右侧终端风格日志查看器（stdout/stderr 切换、搜索高亮、tail 截断、auto-refresh）+ 输出文件列表
+- **任务详情页**：左右分栏布局 — 左侧信息面板（状态/耗时/资源消耗/命令/Git/时间），右侧多标签面板（Script / stdout / stderr / **Processes** / 输出文件列表）
 - **操作按钮**：终止运行中任务、删除已完成记录、重跑（生成全新 Run 记录）、复制命令
-- **资源监控**：每个任务自动记录峰值内存（Peak RSS）和 CPU 累计时间，详情页直接展示
+- **资源监控**：每个任务自动记录峰值内存（Peak RSS）和 CPU 累计时间，详情页直接展示；运行中任务可查看实时子进程列表（Processes 标签页）
 - **移动端适配**：小屏幕自动切换为卡片列表视图
 - **局域网访问**：启动时自动打印所有可用 IP 地址，同局域网任意设备可访问
 
@@ -143,10 +143,24 @@ http://192.168.1.x:9313
 
 | 指标 | 来源 | 说明 |
 |------|------|------|
-| Peak Memory | `/proc/{pid}/status` VmHWM | 进程生命周期峰值物理内存 |
+| Peak Memory | `/proc/{pid}/status` VmHWM | 进程组生命周期峰值物理内存 |
 | CPU Time | `/proc/{pid}/stat` utime+stime | 用户态+内核态累计 CPU 时间 |
 
-数据在任务结束时一次性读取，零性能开销。Web 详情页左侧面板直接展示。
+数据在任务结束时一次性读取，零性能开销。Web 详情页左侧面板和 `brun show` 命令均可查看。
+
+#### 实时进程列表（运行中任务）
+
+对于正在运行的任务（`running` 状态），Web 详情页提供 **Processes** 标签页，实时展示进程组内所有子进程：
+
+| 字段 | 说明 |
+|------|------|
+| PID / PPID | 进程 ID 和父进程 ID |
+| Command | 完整命令行（截断显示，悬停看完整） |
+| State | 进程状态（R 运行 / S 睡眠 / D 不可中断等） |
+| CPU | 累计 CPU 时间 |
+| RSS | 当前物理内存占用（>100MB 标红） |
+
+每 3 秒自动刷新，任务结束后标签页自动隐藏。适用于排查生信流程中哪个步骤在消耗资源。
 
 ## 命令一览
 
@@ -155,7 +169,7 @@ http://192.168.1.x:9313
 | `brun run -- <cmd>` | 执行并完整记录（默认后台） | `brun run -n job1 -p proj -t tagA -- cmd` |
 | `brun run -f -- <cmd>` | 前台运行 | `brun run -f -n job1 -- cmd` |
 | `brun list` | 列出运行历史 | `brun list -p proj -s "bwa" --since 1d` |
-| `brun show <id\|latest>` | 查看详情 | `brun show latest` |
+| `brun show <id\|latest>` | 查看详情（含资源数据） | `brun show latest` |
 | `brun script <id\|latest>` | 查看脚本快照 | `brun script latest` |
 | `brun logs <id\|latest>` | 查看日志 | `brun logs latest --tail 50 --stderr` |
 | `brun outputs <id\|latest>` | 查看输出文件 | `brun outputs latest` |

@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **CLI `brun show` 显示资源数据**：输出新增 Memory（Peak RSS）和 CPU Time 字段，与 Web 详情页信息对齐
+- **运行中任务进程列表**：
+  - 新增 `GET /api/runs/{id}/processes` API，实时返回同组子进程列表（PID/PPID/Command/State/RSS/CPU）
+  - Web 详情页新增 **Processes** 标签页（仅 `running` 状态可见），表格展示各子进程资源占用，高内存行（>100MB）标红，3 秒自动刷新
+  - 数据直接从 `/proc` 文件系统采集，任务结束后标签页自动隐藏
+
 ## [0.2.0] - 2026-05-14
 
 ### 新增
