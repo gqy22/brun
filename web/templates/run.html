@@ -22,8 +22,8 @@
           <div class="detail-title-main" x-text="detail.name || detail.id"></div>
           <div class="detail-title-sub">
             <span x-text="detail.project || 'no project'"></span>
-            <span class="detail-title-dot">/</span>
-            <span x-text="detail.cwd || '-'"></span>
+            <span class="detail-title-dot" x-show="!isNarrowMobile() && detail.cwd">/</span>
+            <span x-show="!isNarrowMobile()" x-text="detail.cwd || '-'"></span>
           </div>
         </div>
       </div>
@@ -64,6 +64,12 @@
                     <span>Duration</span>
                     <strong id="duration-value" x-text="displayDuration"></strong>
                   </div>
+                  <template x-if="detail.status==='running' && processSummary.last_log_update_ago">
+                    <div class="summary-metric summary-metric-wide summary-metric-running">
+                      <span>Last Log</span>
+                      <strong x-text="processSummary.last_log_update_ago"></strong>
+                    </div>
+                  </template>
                   <div class="summary-metric">
                     <span>Exit</span>
                     <strong x-text="detail.exit_code ?? '-'"></strong>
@@ -76,6 +82,18 @@
                     <span>CPU</span>
                     <strong x-text="fmtCPU(detail.cpu_time_ms)"></strong>
                   </div>
+                  <template x-if="detail.status==='running' && processSummary.active_count > 0">
+                    <div class="summary-metric summary-metric-running">
+                      <span>Active</span>
+                      <strong x-text="processSummary.active_count"></strong>
+                    </div>
+                  </template>
+                  <template x-if="detail.status==='running' && processSummary.process_count > 0">
+                    <div class="summary-metric summary-metric-running">
+                      <span>Processes</span>
+                      <strong x-text="processSummary.process_count"></strong>
+                    </div>
+                  </template>
                 </div>
               </div>
 
@@ -103,6 +121,39 @@
                 <label>Ended</label>
                 <div class="side-value" x-text="fmtTime(detail.ended_at) || '-'"></div>
               </div>
+
+              <template x-if="detail.status==='running' && (processSummary.root_pid || processSummary.last_log_update_ago || processSummary.active_count > 0)">
+                <div>
+                  <div class="side-group-title">运行诊断</div>
+                  <template x-if="processSummary.root_pid">
+                    <div class="side-info">
+                      <label>Root PID</label>
+                      <div class="side-value"><code x-text="processSummary.root_pid"></code></div>
+                    </div>
+                  </template>
+                  <template x-if="processSummary.active_count > 0">
+                    <div class="side-info">
+                      <label>Active</label>
+                      <div class="side-value" x-text="processSummary.active_count + ' active processes'"></div>
+                    </div>
+                  </template>
+                  <template x-if="processSummary.process_count > 0">
+                    <div class="side-info">
+                      <label>Processes</label>
+                      <div class="side-value" x-text="processSummary.process_count + ' total'"></div>
+                    </div>
+                  </template>
+                  <template x-if="processSummary.last_log_update_ago">
+                    <div class="side-info">
+                      <label>Last Log</label>
+                      <div class="side-value">
+                        <span x-text="fmtTime(processSummary.last_log_update)"></span>
+                        <span class="time-ago" x-text="processSummary.last_log_update_ago"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
 
               <template x-if="detail.git_commit || (detail.tags && detail.tags.length) || detail.note">
                 <div>
@@ -388,6 +439,7 @@
             var d = await r.json();
             document.title = (d.name || d.id) + ' - brun';
             this.detail = d;
+            this.processSummary = d.process_summary || {};
             this.scriptContent = d.script || '';
             this.scriptName = d.script_name || '';
             this.displayDuration = d.duration || formatDuration(d.duration_ms) || '-';
@@ -396,6 +448,7 @@
             this.loadLog();
             this.stopDurationTimer();
             if (d.status === 'running' && d.started_at) this.startDurationTimer(d.started_at);
+            if (d.status === 'running') this.loadProcesses();
             if (d.status === 'running') this.connectSSE();
             this.loadStderrSize();
           } catch (e) {
@@ -617,6 +670,10 @@
           navigator.clipboard.writeText(text).then(() => {
             toast('success', successMessage || '已复制到剪贴板');
           }).catch(() => toast('error', '复制失败'));
+        },
+
+        isNarrowMobile() {
+          return window.innerWidth <= 768;
         },
 
         doRerun() {

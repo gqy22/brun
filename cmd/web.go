@@ -150,32 +150,37 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 	tags, _ := s.store.GetTags(run.ID)
 	note, _ := s.store.GetNote(run.ID)
 	script, _ := ReadScriptSnapshot(run.RunDir)
+	processSummary := RunProcessSummary{}
+	if run.Status == "running" {
+		processSummary = s.buildRunProcessSummary(run)
+	}
 
 	jsonResponse(w, map[string]any{
-		"id":          run.ID,
-		"name":        run.Name,
-		"project":     run.Project,
-		"cwd":         run.CWD,
-		"command":     run.Command,
-		"script":      script.Content,
-		"script_name": script.Name,
-		"status":      run.Status,
-		"exit_code":   run.ExitCode,
-		"started_at":  run.StartedAt,
-		"ended_at":    run.EndedAt,
-		"duration_ms": run.DurationMs,
-		"duration":    DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
-		"hostname":    run.Hostname,
-		"username":    run.Username,
-		"git_repo":    run.GitRepo,
-		"git_branch":  run.GitBranch,
-		"git_commit":  run.GitCommit,
-		"git_dirty":   run.GitDirty,
-		"peak_rss_kb": run.PeakRSSKB,
-		"cpu_time_ms": run.CPUTimeMs,
-		"run_dir":     run.RunDir,
-		"tags":        tags,
-		"note":        note,
+		"id":              run.ID,
+		"name":            run.Name,
+		"project":         run.Project,
+		"cwd":             run.CWD,
+		"command":         run.Command,
+		"script":          script.Content,
+		"script_name":     script.Name,
+		"status":          run.Status,
+		"exit_code":       run.ExitCode,
+		"started_at":      run.StartedAt,
+		"ended_at":        run.EndedAt,
+		"duration_ms":     run.DurationMs,
+		"duration":        DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
+		"hostname":        run.Hostname,
+		"username":        run.Username,
+		"git_repo":        run.GitRepo,
+		"git_branch":      run.GitBranch,
+		"git_commit":      run.GitCommit,
+		"git_dirty":       run.GitDirty,
+		"peak_rss_kb":     run.PeakRSSKB,
+		"cpu_time_ms":     run.CPUTimeMs,
+		"run_dir":         run.RunDir,
+		"tags":            tags,
+		"note":            note,
+		"process_summary": processSummary,
 	})
 }
 
@@ -754,6 +759,38 @@ func humanizeAgo(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
+}
+
+func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo) RunProcessSummary {
+	totalRSS := int64(0)
+	activeCount := 0
+	for _, p := range procs {
+		totalRSS += p.RSSKB
+		if isActiveProcessState(p.State) {
+			activeCount++
+		}
+	}
+	lastLogUpdate, lastLogUpdateAgo := readLastLogUpdate(runDir)
+	return RunProcessSummary{
+		RootPID:          rootPID,
+		ProcessCount:     len(procs),
+		ActiveCount:      activeCount,
+		TotalRSSKB:       totalRSS,
+		LastLogUpdate:    lastLogUpdate,
+		LastLogUpdateAgo: lastLogUpdateAgo,
+	}
+}
+
+func (s *WebServer) buildRunProcessSummary(run *internal.Run) RunProcessSummary {
+	pid, ok := s.readPID(run.RunDir)
+	if !ok || pid <= 0 {
+		return RunProcessSummary{}
+	}
+	procs := ListProcessTree(pid)
+	if len(procs) == 0 {
+		procs = ListProcessGroup(pid)
+	}
+	return summarizeProcesses(pid, run.RunDir, procs)
 }
 
 func (s *WebServer) readPID(runDir string) (int, bool) {
