@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFormatRunList(t *testing.T) {
@@ -152,6 +153,21 @@ func TestDurationString(t *testing.T) {
 		if !strings.Contains(got, tt.contains) {
 			t.Errorf("DurationString(%d) = %q, want contain %q", tt.ms, got, tt.contains)
 		}
+	}
+}
+
+func TestDisplayDuration_RunningUsesElapsed(t *testing.T) {
+	startedAt := time.Now().Add(-2 * time.Second).UTC().Format(time.RFC3339)
+	got := DisplayDuration("running", startedAt, 0)
+	if got == "0ms" {
+		t.Fatalf("DisplayDuration() = %q, want non-zero elapsed time", got)
+	}
+}
+
+func TestDisplayDuration_FinishedUsesStoredDuration(t *testing.T) {
+	got := DisplayDuration("failed", time.Now().UTC().Format(time.RFC3339), 30_000)
+	if got != "30s" {
+		t.Fatalf("DisplayDuration() = %q, want 30s", got)
 	}
 }
 

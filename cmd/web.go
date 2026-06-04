@@ -122,7 +122,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 			Name:      run.Name,
 			Project:   run.Project,
 			Status:    run.Status,
-			Duration:  DurationString(run.DurationMs),
+			Duration:  DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
 			Command:   truncate(run.Command, 80),
 			StartedAt: run.StartedAt,
 		}
@@ -155,7 +155,7 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"started_at":  run.StartedAt,
 		"ended_at":    run.EndedAt,
 		"duration_ms": run.DurationMs,
-		"duration":    DurationString(run.DurationMs),
+		"duration":    DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
 		"hostname":    run.Hostname,
 		"username":    run.Username,
 		"git_repo":    run.GitRepo,
@@ -357,9 +357,9 @@ func (s *WebServer) apiGetProcesses(w http.ResponseWriter, r *http.Request) {
 		totalRSS += p.RSSKB
 	}
 	jsonResponse(w, map[string]any{
-		"processes": procs,
+		"processes":    procs,
 		"total_rss_kb": totalRSS,
-		"count":       len(procs),
+		"count":        len(procs),
 	})
 }
 
@@ -650,15 +650,31 @@ func (s *WebServer) checkRunningTasks() {
 	for _, run := range runs {
 		pid, ok := s.readPID(run.RunDir)
 		if !ok {
-			s.store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+			s.markRunFailedNow(run)
 			internal.Log().Warn("health_check_zombie_no_pid", "run_id", run.ID)
 			continue
 		}
 
 		if err := syscall.Kill(pid, 0); err != nil {
-			s.store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+			s.markRunFailedNow(run)
 			internal.Log().Warn("health_check_zombie_process_dead", "run_id", run.ID, "pid", pid)
 		}
+	}
+}
+
+func (s *WebServer) markRunFailedNow(run *internal.Run) {
+	endedAt := time.Now().UTC()
+	durationMs := run.DurationMs
+	if run.StartedAt != "" {
+		if started, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
+			durationMs = endedAt.Sub(started).Milliseconds()
+			if durationMs < 0 {
+				durationMs = 0
+			}
+		}
+	}
+	if err := s.store.UpdateRunStatus(run.ID, "failed", -1, endedAt.Format(time.RFC3339), durationMs); err != nil {
+		internal.Log().Error("health_check_update_failed", "run_id", run.ID, "error", err.Error())
 	}
 }
 

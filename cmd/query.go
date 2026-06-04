@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type RunRow struct {
@@ -225,6 +226,19 @@ func fmtCPU(ms int64) string {
 	default:
 		return fmt.Sprintf("%.2fs", float64(ms)/1000)
 	}
+}
+
+func DisplayDuration(status, startedAt string, durationMs int64) string {
+	if status == "running" && startedAt != "" {
+		if started, err := time.Parse(time.RFC3339, startedAt); err == nil {
+			ms := time.Since(started).Milliseconds()
+			if ms < 0 {
+				ms = 0
+			}
+			return DurationString(ms)
+		}
+	}
+	return DurationString(durationMs)
 }
 
 func DurationString(ms int64) string {

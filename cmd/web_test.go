@@ -306,6 +306,30 @@ func TestSSEStreamLogs_FinishedRun_SendsCompleteAndCloses(t *testing.T) {
 	}
 }
 
+func TestHealthCheckMarksZombieRunWithEndedAtAndDuration(t *testing.T) {
+	srv, runID := newTestServer(t)
+	runDir := srv.getTestRunDir(t, runID)
+	if err := os.WriteFile(filepath.Join(runDir, ".pid"), []byte("999999\n"), 0644); err != nil {
+		t.Fatalf("写入 pid 失败: %v", err)
+	}
+
+	srv.checkRunningTasks()
+
+	run, err := srv.store.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("Status = %q, want failed", run.Status)
+	}
+	if run.EndedAt == "" {
+		t.Fatal("EndedAt should be set for zombie run")
+	}
+	if run.DurationMs < 0 {
+		t.Fatalf("DurationMs = %d, want >= 0", run.DurationMs)
+	}
+}
+
 // ===== 辅助函数 =====
 
 func (s *WebServer) getTestRunDir(t *testing.T, runID string) string {

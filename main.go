@@ -578,7 +578,7 @@ func listCmd() *cobra.Command {
 					Name:     r.Name,
 					Project:  r.Project,
 					Status:   r.Status,
-					Duration: cmd.DurationString(r.DurationMs),
+					Duration: cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
 					Command:  r.Command,
 				}
 			}
@@ -633,7 +633,7 @@ func showCmd() *cobra.Command {
 				CWD:       r.CWD,
 				StartedAt: r.StartedAt,
 				EndedAt:   r.EndedAt,
-				Duration:  cmd.DurationString(r.DurationMs),
+				Duration:  cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
 				ExitCode:  r.ExitCode,
 				PeakRSSKB: r.PeakRSSKB,
 				CPUTimeMs: r.CPUTimeMs,
