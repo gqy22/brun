@@ -116,7 +116,7 @@ brun rerun latest                  # 确认后真正复跑
 启动后浏览器访问即可使用完整可视化管理界面：
 
 ```bash
-brun web                    # 默认端口 9313
+brun web                    # 默认端口 9213
 brun web --port 8080        # 自定义端口
 ```
 
@@ -131,10 +131,10 @@ brun web --port 8080        # 自定义端口
 
 ```bash
 # 启动后浏览器打开
-open http://localhost:9313
+open http://localhost:9213
 
 # 或从其他设备访问（手机/平板查看运行状态）
-http://192.168.1.x:9313
+http://192.168.1.x:9213
 ```
 
 ### 资源监控
