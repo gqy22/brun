@@ -164,6 +164,8 @@
             <div class="log-toolbar" x-show="tab==='processes'">
               <span class="process-meta" x-text="processes.length + ' processes'"></span>
               <span x-show="totalProcessRSS > 0" style="margin-left:12px;color:var(--muted)">Total RSS: <strong x-text="fmtMem(totalProcessRSS)"></strong></span>
+              <span x-show="processSummary.active_count > 0" style="margin-left:12px;color:var(--muted)">Active: <strong x-text="processSummary.active_count"></strong></span>
+              <span x-show="processSummary.last_log_update_ago" style="margin-left:12px;color:var(--muted)">Last log: <strong x-text="processSummary.last_log_update_ago"></strong></span>
               <button class="btn btn-sm btn-outline" @click="loadProcesses()" style="margin-left:auto">刷新</button>
             </div>
           </div>
@@ -281,6 +283,7 @@
         // --- 进程列表 ---
         processes: [],
         totalProcessRSS: 0,
+        processSummary: {},
         processTimer: null,
 
         async init() {
@@ -575,8 +578,10 @@
             var d = await fetch('/api/runs/' + RUN_ID + '/processes').then(function(r) { return r.json(); });
             this.processes = d.processes || [];
             this.totalProcessRSS = d.total_rss_kb || 0;
+            this.processSummary = d.summary || {};
           } catch(e) {
             this.processes = [];
+            this.processSummary = {};
           }
         },
 

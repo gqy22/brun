@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -52,6 +53,7 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	mux.HandleFunc("GET /api/runs/{id}", ws.apiGetRun)
 	mux.HandleFunc("GET /api/runs/{id}/logs", ws.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/logs/stream", ws.apiStreamLogs)
+	mux.HandleFunc("GET /api/runs/{id}/processes", ws.apiGetProcesses)
 
 	// 启动真实 HTTP server（用于 SSE 长连接测试）
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -327,6 +329,36 @@ func TestHealthCheckMarksZombieRunWithEndedAtAndDuration(t *testing.T) {
 	}
 	if run.DurationMs < 0 {
 		t.Fatalf("DurationMs = %d, want >= 0", run.DurationMs)
+	}
+}
+
+func TestApiGetProcesses_ReturnsSummary(t *testing.T) {
+	srv, runID := newTestServer(t)
+	runDir := srv.getTestRunDir(t, runID)
+	if err := os.WriteFile(filepath.Join(runDir, ".pid"), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0644); err != nil {
+		t.Fatalf("写入 pid 失败: %v", err)
+	}
+
+	w := srv.doReq("GET", "/api/runs/"+runID+"/processes")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Processes []ProcessInfo     `json:"processes"`
+		Summary   RunProcessSummary `json:"summary"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Summary.RootPID != os.Getpid() {
+		t.Fatalf("root_pid = %d, want %d", resp.Summary.RootPID, os.Getpid())
+	}
+	if resp.Summary.LastLogUpdate == "" {
+		t.Fatal("last_log_update should not be empty")
+	}
+	if resp.Summary.ProcessCount < 1 {
+		t.Fatalf("process_count = %d, want >= 1", resp.Summary.ProcessCount)
 	}
 }
 

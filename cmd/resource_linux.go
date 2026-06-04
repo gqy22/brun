@@ -141,6 +141,10 @@ func ListProcessGroup(pgid int) []ProcessInfo {
 	return listProcessGroupFromProc("/proc", pgid, clockTicksPerSecond())
 }
 
+func ListProcessTree(rootPID int) []ProcessInfo {
+	return listProcessTreeFromProc("/proc", rootPID, clockTicksPerSecond())
+}
+
 func listProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64) []ProcessInfo {
 	if pgid <= 0 || ticksPerSecond <= 0 {
 		return nil
@@ -236,6 +240,122 @@ func sampleProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64)
 		PeakRSSKB: rssKB,
 		CPUTimeMs: int64(cpuTicks) * 1000 / ticksPerSecond,
 	}
+}
+
+func SampleProcessTree(rootPID int) ResourceUsage {
+	return sampleProcessTreeFromProc("/proc", rootPID, clockTicksPerSecond())
+}
+
+func listProcessTreeFromProc(procRoot string, rootPID int, ticksPerSecond int64) []ProcessInfo {
+	if rootPID <= 0 || ticksPerSecond <= 0 {
+		return nil
+	}
+
+	pids := walkProcessTree(procRoot, rootPID)
+	if len(pids) == 0 {
+		return nil
+	}
+
+	procs := make([]ProcessInfo, 0, len(pids))
+	for _, pid := range pids {
+		info, ok := readProcessInfo(procRoot, pid, ticksPerSecond)
+		if !ok {
+			continue
+		}
+		procs = append(procs, info)
+	}
+	return procs
+}
+
+func sampleProcessTreeFromProc(procRoot string, rootPID int, ticksPerSecond int64) ResourceUsage {
+	if rootPID <= 0 || ticksPerSecond <= 0 {
+		return ResourceUsage{}
+	}
+
+	pids := walkProcessTree(procRoot, rootPID)
+	var rssKB int64
+	var cpuMs int64
+	for _, pid := range pids {
+		info, ok := readProcessInfo(procRoot, pid, ticksPerSecond)
+		if !ok {
+			continue
+		}
+		rssKB += info.RSSKB
+		cpuMs += info.CPUTime
+	}
+	return ResourceUsage{PeakRSSKB: rssKB, CPUTimeMs: cpuMs}
+}
+
+func walkProcessTree(procRoot string, rootPID int) []int {
+	queue := []int{rootPID}
+	seen := map[int]struct{}{}
+	var ordered []int
+
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if pid <= 0 {
+			continue
+		}
+		if _, ok := seen[pid]; ok {
+			continue
+		}
+		seen[pid] = struct{}{}
+		ordered = append(ordered, pid)
+		queue = append(queue, readChildren(procRoot, pid)...)
+	}
+	return ordered
+}
+
+func readChildren(procRoot string, pid int) []int {
+	data, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
+	if err != nil {
+		return nil
+	}
+	fields := strings.Fields(string(data))
+	children := make([]int, 0, len(fields))
+	for _, field := range fields {
+		child, err := strconv.Atoi(field)
+		if err != nil || child <= 0 {
+			continue
+		}
+		children = append(children, child)
+	}
+	return children
+}
+
+func readProcessInfo(procRoot string, pid int, ticksPerSecond int64) (ProcessInfo, bool) {
+	dir := filepath.Join(procRoot, strconv.Itoa(pid))
+	statData, err := os.ReadFile(filepath.Join(dir, "stat"))
+	if err != nil {
+		return ProcessInfo{}, false
+	}
+	ps, err := parseProcStatFull(statData)
+	if err != nil {
+		return ProcessInfo{}, false
+	}
+
+	var rssKB int64
+	if statusData, err := os.ReadFile(filepath.Join(dir, "status")); err == nil {
+		rssKB = readStatusValueKB(statusData, "VmRSS:")
+	}
+
+	cmdline := ""
+	if clData, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+		cmdline = strings.ReplaceAll(string(clData), "\x00", " ")
+		cmdline = strings.TrimSpace(cmdline)
+	}
+
+	cpuMs := int64(ps.utimeTicks+ps.stimeTicks) * 1000 / ticksPerSecond
+	return ProcessInfo{
+		PID:     ps.pid,
+		PPID:    ps.ppid,
+		Comm:    ps.comm,
+		State:   ps.state,
+		RSSKB:   rssKB,
+		CPUTime: cpuMs,
+		Cmdline: cmdline,
+	}, true
 }
 
 func parseProcStat(data []byte) (procStat, error) {

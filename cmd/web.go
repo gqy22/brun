@@ -16,6 +16,15 @@ import (
 	"github.com/biotools/brun/internal"
 )
 
+type RunProcessSummary struct {
+	RootPID          int    `json:"root_pid"`
+	ProcessCount     int    `json:"process_count"`
+	ActiveCount      int    `json:"active_count"`
+	TotalRSSKB       int64  `json:"total_rss_kb"`
+	LastLogUpdate    string `json:"last_log_update"`
+	LastLogUpdateAgo string `json:"last_log_update_ago"`
+}
+
 type WebServer struct {
 	store   *internal.Store
 	addr    string
@@ -341,25 +350,48 @@ func (s *WebServer) apiGetProcesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if run.Status != "running" {
-		jsonResponse(w, map[string]any{"processes": []ProcessInfo{}, "status": run.Status})
+		jsonResponse(w, map[string]any{
+			"processes": []ProcessInfo{},
+			"status":    run.Status,
+			"summary":   RunProcessSummary{},
+		})
 		return
 	}
 
 	pid, ok := s.readPID(run.RunDir)
 	if !ok || pid <= 0 {
-		jsonResponse(w, map[string]any{"processes": []ProcessInfo{}})
+		jsonResponse(w, map[string]any{
+			"processes": []ProcessInfo{},
+			"summary":   RunProcessSummary{},
+		})
 		return
 	}
 
-	procs := ListProcessGroup(pid)
+	procs := ListProcessTree(pid)
+	if len(procs) == 0 {
+		procs = ListProcessGroup(pid)
+	}
 	totalRSS := int64(0)
+	activeCount := 0
 	for _, p := range procs {
 		totalRSS += p.RSSKB
+		if isActiveProcessState(p.State) {
+			activeCount++
+		}
 	}
+	lastLogUpdate, lastLogUpdateAgo := readLastLogUpdate(run.RunDir)
 	jsonResponse(w, map[string]any{
 		"processes":    procs,
 		"total_rss_kb": totalRSS,
 		"count":        len(procs),
+		"summary": RunProcessSummary{
+			RootPID:          pid,
+			ProcessCount:     len(procs),
+			ActiveCount:      activeCount,
+			TotalRSSKB:       totalRSS,
+			LastLogUpdate:    lastLogUpdate,
+			LastLogUpdateAgo: lastLogUpdateAgo,
+		},
 	})
 }
 
@@ -675,6 +707,52 @@ func (s *WebServer) markRunFailedNow(run *internal.Run) {
 	}
 	if err := s.store.UpdateRunStatus(run.ID, "failed", -1, endedAt.Format(time.RFC3339), durationMs); err != nil {
 		internal.Log().Error("health_check_update_failed", "run_id", run.ID, "error", err.Error())
+	}
+}
+
+func isActiveProcessState(state string) bool {
+	switch state {
+	case "R", "D":
+		return true
+	default:
+		return false
+	}
+}
+
+func readLastLogUpdate(runDir string) (string, string) {
+	paths := []string{
+		filepath.Join(runDir, "stdout.o"),
+		filepath.Join(runDir, "stderr.er"),
+	}
+	var latest time.Time
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+	if latest.IsZero() {
+		return "", ""
+	}
+	return latest.UTC().Format(time.RFC3339), humanizeAgo(time.Since(latest))
+}
+
+func humanizeAgo(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
 }
 

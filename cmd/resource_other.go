@@ -43,3 +43,11 @@ func killProcessGroup(pgid int, sig syscall.Signal) error {
 func ListProcessGroup(_ int) []ProcessInfo {
 	return nil
 }
+
+func ListProcessTree(_ int) []ProcessInfo {
+	return nil
+}
+
+func SampleProcessTree(_ int) ResourceUsage {
+	return ResourceUsage{}
+}
