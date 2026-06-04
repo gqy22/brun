@@ -1,12 +1,83 @@
-# brun
+<p align="center">
+  <img src="docs/assets/brun-logo.svg" width="132" alt="brun logo">
+</p>
 
-面向生物信息学开发的运行记录与日志管理工具。
+<h1 align="center">brun</h1>
 
-在任意目录、任意项目中运行脚本或软件时，自动记录命令、日志、环境、脚本快照、输出文件和运行元数据，便于后续检索、复现、管理和审计。
+<p align="center">
+  Run bioinformatics commands like <code>nohup</code>, but keep the record.
+</p>
 
-## 你该如何使用 brun
+<p align="center">
+  <a href="https://github.com/biotools/brun/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/biotools/brun/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/biotools/brun/releases"><img alt="Release" src="https://img.shields.io/github/v/release/biotools/brun?include_prereleases&label=release"></a>
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a">
+</p>
 
-### 替代 nohup（最常用）
+`brun` 是面向生物信息学开发的运行记录与日志管理工具。它包装任意 shell 命令，自动记录日志、环境、Git 元数据、脚本快照、输出文件、资源占用、标签、备注和复跑信息。
+
+它适合日常生信开发中最常见的场景：完整 workflow 引擎太重，但裸 `nohup`、手写日志和人工记录又不够可靠。
+
+## 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| 默认后台运行 | 像 `nohup` 一样关闭终端后继续跑，但无需手写重定向 |
+| 自动日志归档 | stdout、stderr、命令、环境和 metadata 统一保存 |
+| 脚本快照 | 自动保存运行时输入脚本，方便事后追溯 |
+| 输出文件检测 | 通过 fs-diff 记录新增、修改、删除的输出文件 |
+| 运行检索 | 按 project、status、tag、关键词和时间范围查询历史 |
+| Web Dashboard | 浏览器查看运行状态、日志、输出文件和进程资源 |
+| 复跑与审计 | 从历史记录恢复命令，保留 Git、环境和资源信息 |
+
+## 安装
+
+### 从源码安装
+
+```bash
+go install github.com/biotools/brun@latest
+```
+
+### 本地构建
+
+```bash
+git clone https://github.com/biotools/brun.git
+cd brun
+make build
+./bin/brun --help
+```
+
+### 下载 Release
+
+预编译包会随 GitHub Release 发布，目标平台包括：
+
+- Linux amd64 / arm64
+- macOS amd64 / arm64
+
+## 快速开始
+
+```bash
+# 1. 运行命令，默认后台执行
+brun run -n align-S1 -p wgs -t sample:S1 -- bwa mem -t 16 ref.fa reads.fq.gz
+
+# 2. 查看历史记录
+brun list -p wgs
+
+# 3. 查看日志、输出和脚本快照
+brun logs latest --tail 100
+brun outputs latest
+brun script latest
+```
+
+启动 Web Dashboard：
+
+```bash
+brun web
+open http://localhost:9213
+```
+
+## 为什么不是 nohup
 
 你以前这样跑脚本：
 
@@ -19,7 +90,9 @@ nohup bash test.sh > test.sh.o 2> test.sh.er &
 
 ```bash
 brun run -n my-script -- bash test.sh
-# → [detach] PID=12345, 日志: ~/.bio-runner/detach.log
+# → [nohup] PID=12345, RunID=20260604-153012-a8f3c2
+# → [nohup] stdout: ~/.bio-runner/runs/2026/06/04/20260604-153012-a8f3c2/stdout.o
+# → [nohup] stderr: ~/.bio-runner/runs/2026/06/04/20260604-153012-a8f3c2/stderr.er
 # → 关掉终端也没事，进程继续跑
 ```
 
@@ -245,15 +318,15 @@ brun list -p wgs -s "mem" --since 3d    # 组合使用
 ```
 ~/.bio-runner/
 ├── db.sqlite              # SQLite 数据库
-├── detach.log             # 后台运行日志
+├── brun.log               # brun 自身日志
 └── runs/
     └── YYYY/MM/DD/
         └── <run_id>/
             ├── metadata.yaml     # 结构化元数据
             ├── command.sh        # 完整命令
             ├── script.<name>      # 输入脚本快照（如 script.04.sh）
-            ├── stdout.log        # 标准输出
-            ├── stderr.log        # 错误输出
+            ├── stdout.o          # 标准输出
+            ├── stderr.er         # 错误输出
             └── env.txt           # 环境摘要
 ```
 
@@ -305,7 +378,7 @@ make release-all
 
 ## 技术栈
 
-- **Go 1.22+** / **cobra** CLI
+- **Go 1.25+** / **cobra** CLI
 - **SQLite** (modernc.org/sqlite, 纯 Go 无 CGO)
 - **YAML** 配置解析
 - **WAL 模式 + 指数退避重试** 支持并发写入
