@@ -240,17 +240,29 @@
             </template>
             <template x-if="processes.length > 0">
               <table class="table processes-table">
-                <thead><tr><th>PID</th><th>Command</th><th>State</th><th>CPU</th><th>RSS</th></tr></thead>
+                <thead><tr><th>Role</th><th>PID</th><th>PPID</th><th>State</th><th>CPU Δ</th><th>CPU</th><th>RSS</th><th>Command</th></tr></thead>
                 <tbody>
                   <template x-for="p in processes" :key="p.pid">
-                    <tr :class="{'proc-high-rss': p.rss_kb > 100*1024}">
-                      <td class="proc-pid"><code x-text="p.pid"></code></td>
-                      <td class="proc-cmd">
-                        <span :title="p.cmdline" x-text="p.cmdline ? truncate(p.cmdline, 80) : p.comm"></span>
+                    <tr :class="{'proc-high-rss': p.rss_kb > 100*1024, 'proc-active': p.is_active}">
+                      <td class="proc-role">
+                        <span :class="'proc-role-badge role-'+(p.role || 'process')" x-text="p.role || 'process'"></span>
                       </td>
-                      <td><span :class="'badge badge-'+stateBadgeClass(p.state)" x-text="p.state"></span></td>
+                      <td class="proc-pid" :style="'padding-left:' + ((p.depth || 0) * 16 + 14) + 'px'">
+                        <code x-text="p.pid"></code>
+                      </td>
+                      <td class="proc-pid proc-ppid"><code x-text="p.ppid || '-'"></code></td>
+                      <td>
+                        <span class="proc-state">
+                          <span class="proc-active-dot" x-show="p.is_active"></span>
+                          <span :class="'badge badge-'+stateBadgeClass(p.state)" x-text="p.state"></span>
+                        </span>
+                      </td>
+                      <td x-text="fmtCPU(p.cpu_delta_ms)"></td>
                       <td x-text="fmtCPU(p.cpu_time_ms)"></td>
                       <td :class="{'proc-high-mem': p.rss_kb > 100*1024}" x-text="fmtMem(p.rss_kb)"></td>
+                      <td class="proc-cmd">
+                        <span :title="p.cmdline || p.comm" x-text="p.cmdline ? truncate(p.cmdline, 120) : p.comm"></span>
+                      </td>
                     </tr>
                   </template>
                 </tbody>

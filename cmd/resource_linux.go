@@ -19,13 +19,18 @@ type ResourceUsage struct {
 }
 
 type ProcessInfo struct {
-	PID     int    `json:"pid"`
-	PPID    int    `json:"ppid"`
-	Comm    string `json:"comm"`
-	State   string `json:"state"`
-	RSSKB   int64  `json:"rss_kb"`
-	CPUTime int64  `json:"cpu_time_ms"`
-	Cmdline string `json:"cmdline"`
+	PID        int    `json:"pid"`
+	PPID       int    `json:"ppid"`
+	PGID       int    `json:"pgid"`
+	Depth      int    `json:"depth"`
+	Role       string `json:"role"`
+	State      string `json:"state"`
+	IsActive   bool   `json:"is_active"`
+	Comm       string `json:"comm"`
+	RSSKB      int64  `json:"rss_kb"`
+	CPUTime    int64  `json:"cpu_time_ms"`
+	CPUDeltaMs int64  `json:"cpu_delta_ms"`
+	Cmdline    string `json:"cmdline"`
 }
 
 type procStat struct {
@@ -43,6 +48,11 @@ type procStatFull struct {
 	comm       string
 	utimeTicks uint64
 	stimeTicks uint64
+}
+
+type processTreeNode struct {
+	pid   int
+	depth int
 }
 
 type ProcessGroupSampler struct {
@@ -145,6 +155,21 @@ func ListProcessTree(rootPID int) []ProcessInfo {
 	return listProcessTreeFromProc("/proc", rootPID, clockTicksPerSecond())
 }
 
+func ListProcessTreeWithActivity(rootPID int, interval time.Duration) []ProcessInfo {
+	before := ListProcessTree(rootPID)
+	if len(before) == 0 {
+		return nil
+	}
+	if interval > 0 {
+		time.Sleep(interval)
+	}
+	after := ListProcessTree(rootPID)
+	if len(after) == 0 {
+		return markProcessActivity(nil, before)
+	}
+	return markProcessActivity(before, after)
+}
+
 func listProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64) []ProcessInfo {
 	if pgid <= 0 || ticksPerSecond <= 0 {
 		return nil
@@ -187,15 +212,20 @@ func listProcessGroupFromProc(procRoot string, pgid int, ticksPerSecond int64) [
 
 		cpuMs := int64(ps.utimeTicks+ps.stimeTicks) * 1000 / ticksPerSecond
 
-		procs = append(procs, ProcessInfo{
-			PID:     ps.pid,
-			PPID:    ps.ppid,
-			Comm:    ps.comm,
-			State:   ps.state,
-			RSSKB:   rssKB,
-			CPUTime: cpuMs,
-			Cmdline: cmdline,
-		})
+		info := ProcessInfo{
+			PID:      ps.pid,
+			PPID:     ps.ppid,
+			PGID:     ps.pgrp,
+			Depth:    0,
+			Role:     "process",
+			State:    ps.state,
+			IsActive: isActiveProcessState(ps.state),
+			Comm:     ps.comm,
+			RSSKB:    rssKB,
+			CPUTime:  cpuMs,
+			Cmdline:  cmdline,
+		}
+		procs = append(procs, info)
 	}
 	return procs
 }
@@ -251,14 +281,14 @@ func listProcessTreeFromProc(procRoot string, rootPID int, ticksPerSecond int64)
 		return nil
 	}
 
-	pids := walkProcessTree(procRoot, rootPID)
-	if len(pids) == 0 {
+	nodes := walkProcessTree(procRoot, rootPID)
+	if len(nodes) == 0 {
 		return nil
 	}
 
-	procs := make([]ProcessInfo, 0, len(pids))
-	for _, pid := range pids {
-		info, ok := readProcessInfo(procRoot, pid, ticksPerSecond)
+	procs := make([]ProcessInfo, 0, len(nodes))
+	for _, node := range nodes {
+		info, ok := readProcessInfo(procRoot, node.pid, node.depth, rootPID, ticksPerSecond)
 		if !ok {
 			continue
 		}
@@ -272,11 +302,11 @@ func sampleProcessTreeFromProc(procRoot string, rootPID int, ticksPerSecond int6
 		return ResourceUsage{}
 	}
 
-	pids := walkProcessTree(procRoot, rootPID)
+	nodes := walkProcessTree(procRoot, rootPID)
 	var rssKB int64
 	var cpuMs int64
-	for _, pid := range pids {
-		info, ok := readProcessInfo(procRoot, pid, ticksPerSecond)
+	for _, node := range nodes {
+		info, ok := readProcessInfo(procRoot, node.pid, node.depth, rootPID, ticksPerSecond)
 		if !ok {
 			continue
 		}
@@ -286,23 +316,25 @@ func sampleProcessTreeFromProc(procRoot string, rootPID int, ticksPerSecond int6
 	return ResourceUsage{PeakRSSKB: rssKB, CPUTimeMs: cpuMs}
 }
 
-func walkProcessTree(procRoot string, rootPID int) []int {
-	queue := []int{rootPID}
+func walkProcessTree(procRoot string, rootPID int) []processTreeNode {
+	queue := []processTreeNode{{pid: rootPID, depth: 0}}
 	seen := map[int]struct{}{}
-	var ordered []int
+	var ordered []processTreeNode
 
 	for len(queue) > 0 {
-		pid := queue[0]
+		node := queue[0]
 		queue = queue[1:]
-		if pid <= 0 {
+		if node.pid <= 0 {
 			continue
 		}
-		if _, ok := seen[pid]; ok {
+		if _, ok := seen[node.pid]; ok {
 			continue
 		}
-		seen[pid] = struct{}{}
-		ordered = append(ordered, pid)
-		queue = append(queue, readChildren(procRoot, pid)...)
+		seen[node.pid] = struct{}{}
+		ordered = append(ordered, node)
+		for _, child := range readChildren(procRoot, node.pid) {
+			queue = append(queue, processTreeNode{pid: child, depth: node.depth + 1})
+		}
 	}
 	return ordered
 }
@@ -324,7 +356,7 @@ func readChildren(procRoot string, pid int) []int {
 	return children
 }
 
-func readProcessInfo(procRoot string, pid int, ticksPerSecond int64) (ProcessInfo, bool) {
+func readProcessInfo(procRoot string, pid int, depth int, rootPID int, ticksPerSecond int64) (ProcessInfo, bool) {
 	dir := filepath.Join(procRoot, strconv.Itoa(pid))
 	statData, err := os.ReadFile(filepath.Join(dir, "stat"))
 	if err != nil {
@@ -348,14 +380,53 @@ func readProcessInfo(procRoot string, pid int, ticksPerSecond int64) (ProcessInf
 
 	cpuMs := int64(ps.utimeTicks+ps.stimeTicks) * 1000 / ticksPerSecond
 	return ProcessInfo{
-		PID:     ps.pid,
-		PPID:    ps.ppid,
-		Comm:    ps.comm,
-		State:   ps.state,
-		RSSKB:   rssKB,
-		CPUTime: cpuMs,
-		Cmdline: cmdline,
+		PID:      ps.pid,
+		PPID:     ps.ppid,
+		PGID:     ps.pgrp,
+		Depth:    depth,
+		Role:     processRole(ps.pid, rootPID, depth, ps.comm, cmdline),
+		State:    ps.state,
+		IsActive: isActiveProcessState(ps.state),
+		Comm:     ps.comm,
+		RSSKB:    rssKB,
+		CPUTime:  cpuMs,
+		Cmdline:  cmdline,
 	}, true
+}
+
+func markProcessActivity(before []ProcessInfo, after []ProcessInfo) []ProcessInfo {
+	if len(after) == 0 {
+		return nil
+	}
+	cpuByPID := make(map[int]int64, len(before))
+	for _, p := range before {
+		cpuByPID[p.PID] = p.CPUTime
+	}
+	for i := range after {
+		if prevCPU, ok := cpuByPID[after[i].PID]; ok {
+			delta := after[i].CPUTime - prevCPU
+			if delta > 0 {
+				after[i].CPUDeltaMs = delta
+			}
+		}
+		after[i].IsActive = after[i].CPUDeltaMs > 0 || isActiveProcessState(after[i].State)
+	}
+	return after
+}
+
+func processRole(pid int, rootPID int, depth int, comm string, cmdline string) string {
+	if pid == rootPID || depth == 0 {
+		return "root"
+	}
+	text := strings.ToLower(comm + " " + cmdline)
+	switch {
+	case strings.Contains(text, "brun"):
+		return "runner"
+	case comm == "bash" || comm == "sh" || comm == "zsh" || strings.Contains(text, "/bin/bash") || strings.Contains(text, "/bin/sh"):
+		return "shell"
+	default:
+		return "worker"
+	}
 }
 
 func parseProcStat(data []byte) (procStat, error) {

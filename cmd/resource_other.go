@@ -13,13 +13,18 @@ type ResourceUsage struct {
 }
 
 type ProcessInfo struct {
-	PID     int    `json:"pid"`
-	PPID    int    `json:"ppid"`
-	Comm    string `json:"comm"`
-	State   string `json:"state"`
-	RSSKB   int64  `json:"rss_kb"`
-	CPUTime int64  `json:"cpu_time_ms"`
-	Cmdline string `json:"cmdline"`
+	PID        int    `json:"pid"`
+	PPID       int    `json:"ppid"`
+	PGID       int    `json:"pgid"`
+	Depth      int    `json:"depth"`
+	Role       string `json:"role"`
+	State      string `json:"state"`
+	IsActive   bool   `json:"is_active"`
+	Comm       string `json:"comm"`
+	RSSKB      int64  `json:"rss_kb"`
+	CPUTime    int64  `json:"cpu_time_ms"`
+	CPUDeltaMs int64  `json:"cpu_delta_ms"`
+	Cmdline    string `json:"cmdline"`
 }
 
 type ProcessGroupSampler struct{}
@@ -45,6 +50,10 @@ func ListProcessGroup(_ int) []ProcessInfo {
 }
 
 func ListProcessTree(_ int) []ProcessInfo {
+	return nil
+}
+
+func ListProcessTreeWithActivity(_ int, _ time.Duration) []ProcessInfo {
 	return nil
 }
 

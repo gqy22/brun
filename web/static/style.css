@@ -932,9 +932,11 @@ code {
 /* ===== Processes Table ===== */
 .processes-viewer {
   padding: 0;
+  overflow-x: auto;
 }
 .processes-table {
   width: 100%;
+  min-width: 860px;
   font-size: 13px;
 }
 .processes-table th {
@@ -956,11 +958,69 @@ code {
 .processes-table tbody tr:hover {
   background: rgba(255,255,255,.03);
 }
+.processes-table tbody tr.proc-active {
+  background: rgba(34,197,94,.05);
+}
+.processes-table tbody tr.proc-active:hover {
+  background: rgba(34,197,94,.08);
+}
+.proc-role {
+  white-space: nowrap;
+}
+.proc-role-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.proc-role-badge.role-root {
+  color: #93c5fd;
+  background: rgba(59,130,246,.12);
+  border-color: rgba(59,130,246,.22);
+}
+.proc-role-badge.role-runner {
+  color: #c4b5fd;
+  background: rgba(139,92,246,.14);
+  border-color: rgba(139,92,246,.24);
+}
+.proc-role-badge.role-shell {
+  color: #fde68a;
+  background: rgba(245,158,11,.12);
+  border-color: rgba(245,158,11,.22);
+}
+.proc-role-badge.role-worker {
+  color: #86efac;
+  background: rgba(34,197,94,.12);
+  border-color: rgba(34,197,94,.22);
+}
 .proc-pid code {
   font-size: 12.5px;
 }
+.proc-ppid code {
+  color: var(--muted);
+}
+.proc-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.proc-active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34,197,94,.14);
+}
 .proc-cmd {
-  max-width: 400px;
+  max-width: 460px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -68,6 +68,15 @@ func TestListProcessTreeFromProcIncludesDescendantsAcrossGroups(t *testing.T) {
 	if got[1].Cmdline != "worker-a" {
 		t.Fatalf("cmdline = %q, want worker-a", got[1].Cmdline)
 	}
+	if got[0].PGID != 101 || got[1].PGID != 202 || got[2].PGID != 303 {
+		t.Fatalf("unexpected pgid values: %+v", got)
+	}
+	if got[0].Depth != 0 || got[1].Depth != 1 || got[2].Depth != 1 {
+		t.Fatalf("unexpected depth values: %+v", got)
+	}
+	if got[0].Role != "root" || got[1].Role != "worker" || got[2].Role != "worker" {
+		t.Fatalf("unexpected role values: %+v", got)
+	}
 }
 
 func TestSampleProcessTreeFromProcAggregatesDescendants(t *testing.T) {
@@ -97,6 +106,30 @@ func TestProcessGroupSamplerKeepsPeakObservedUsage(t *testing.T) {
 	}
 	if got.CPUTimeMs != 60 {
 		t.Fatalf("CPUTimeMs = %d, want 60", got.CPUTimeMs)
+	}
+}
+
+func TestMarkProcessActivityUsesCPUDeltaAndState(t *testing.T) {
+	before := []ProcessInfo{
+		{PID: 101, CPUTime: 100, State: "S"},
+		{PID: 102, CPUTime: 200, State: "S"},
+		{PID: 103, CPUTime: 300, State: "S"},
+	}
+	after := []ProcessInfo{
+		{PID: 101, CPUTime: 100, State: "S"},
+		{PID: 102, CPUTime: 260, State: "S"},
+		{PID: 103, CPUTime: 300, State: "R"},
+	}
+
+	got := markProcessActivity(before, after)
+	if got[0].IsActive {
+		t.Fatalf("pid 101 should not be active: %+v", got[0])
+	}
+	if !got[1].IsActive || got[1].CPUDeltaMs != 60 {
+		t.Fatalf("pid 102 activity = %+v, want active with 60ms delta", got[1])
+	}
+	if !got[2].IsActive || got[2].CPUDeltaMs != 0 {
+		t.Fatalf("pid 103 activity = %+v, want active from state only", got[2])
 	}
 }
 

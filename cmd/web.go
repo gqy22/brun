@@ -16,6 +16,8 @@ import (
 	"github.com/biotools/brun/internal"
 )
 
+const processActivitySampleInterval = 300 * time.Millisecond
+
 type RunProcessSummary struct {
 	RootPID          int    `json:"root_pid"`
 	ProcessCount     int    `json:"process_count"`
@@ -372,31 +374,16 @@ func (s *WebServer) apiGetProcesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	procs := ListProcessTree(pid)
+	procs := ListProcessTreeWithActivity(pid, processActivitySampleInterval)
 	if len(procs) == 0 {
 		procs = ListProcessGroup(pid)
 	}
-	totalRSS := int64(0)
-	activeCount := 0
-	for _, p := range procs {
-		totalRSS += p.RSSKB
-		if isActiveProcessState(p.State) {
-			activeCount++
-		}
-	}
-	lastLogUpdate, lastLogUpdateAgo := readLastLogUpdate(run.RunDir)
+	summary := summarizeProcesses(pid, run.RunDir, procs)
 	jsonResponse(w, map[string]any{
 		"processes":    procs,
-		"total_rss_kb": totalRSS,
+		"total_rss_kb": summary.TotalRSSKB,
 		"count":        len(procs),
-		"summary": RunProcessSummary{
-			RootPID:          pid,
-			ProcessCount:     len(procs),
-			ActiveCount:      activeCount,
-			TotalRSSKB:       totalRSS,
-			LastLogUpdate:    lastLogUpdate,
-			LastLogUpdateAgo: lastLogUpdateAgo,
-		},
+		"summary":      summary,
 	})
 }
 
@@ -766,7 +753,7 @@ func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo) RunProc
 	activeCount := 0
 	for _, p := range procs {
 		totalRSS += p.RSSKB
-		if isActiveProcessState(p.State) {
+		if p.IsActive || isActiveProcessState(p.State) {
 			activeCount++
 		}
 	}
@@ -786,7 +773,7 @@ func (s *WebServer) buildRunProcessSummary(run *internal.Run) RunProcessSummary 
 	if !ok || pid <= 0 {
 		return RunProcessSummary{}
 	}
-	procs := ListProcessTree(pid)
+	procs := ListProcessTreeWithActivity(pid, processActivitySampleInterval)
 	if len(procs) == 0 {
 		procs = ListProcessGroup(pid)
 	}
