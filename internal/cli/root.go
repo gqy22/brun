@@ -68,6 +68,7 @@ func Execute(opts Options) error {
 		scriptCmd(),
 		logsCmd(),
 		outputsCmd(),
+		diagCmd(),
 		tagCmd(),
 		noteCmd(),
 		rerunCmd(),

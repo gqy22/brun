@@ -219,13 +219,6 @@ func FormatOutputs(arts []ArtifactRow, runID, project string) string {
 	return b.String()
 }
 
-func ResolveRunID(id string) (string, bool) {
-	if id == "latest" || id == "" {
-		return "", true
-	}
-	return id, false
-}
-
 func FormatSize(bytes int64) string {
 	switch {
 	case bytes < 1024:

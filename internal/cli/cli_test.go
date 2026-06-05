@@ -100,6 +100,64 @@ func TestScriptCmdPathFlag(t *testing.T) {
 	}
 }
 
+func TestScriptCmdRequiresRunSelector(t *testing.T) {
+	c := scriptCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetErr(&out)
+	c.SetArgs(nil)
+
+	if err := c.Execute(); err == nil {
+		t.Fatal("scriptCmd() expected selector error")
+	}
+}
+
+func TestDiagCmdShowsWarningsByDefault(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+
+	runID := "20260605-153012-diag01"
+	runDir := filepath.Join(home, "runs", "2026", "06", "05", runID)
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writer := internal.NewDiagnosticWriter(runDir)
+	writer.Info("project_inferred", "已推断项目名", "proj")
+	writer.Warning("metadata_write_failed", "metadata.yaml 写入失败", "disk full")
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.CreateRun(&internal.Run{
+		ID:        runID,
+		CWD:       "/tmp",
+		Command:   "echo hi",
+		Status:    "success",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		RunDir:    runDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	c := diagCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetErr(&out)
+	c.SetArgs([]string{runID})
+
+	if err := c.Execute(); err != nil {
+		t.Fatalf("diagCmd() error = %v", err)
+	}
+	if strings.Contains(out.String(), "project_inferred") {
+		t.Fatalf("diag output should hide info by default: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "metadata_write_failed") {
+		t.Fatalf("diag output missing warning: %s", out.String())
+	}
+}
+
 func TestExecuteRunWritesDiagnostics(t *testing.T) {
 	home := fastTempDir(t)
 	t.Setenv("BRUN_HOME", home)

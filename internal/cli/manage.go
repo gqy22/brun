@@ -15,96 +15,120 @@ import (
 )
 
 func tagCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tag <run_id|latest> TAG...",
+	var latest bool
+	c := &cobra.Command{
+		Use:   "tag <run_id> TAG...",
 		Short: "添加标签",
-		Args:  cobra.MinimumNArgs(2),
+		Args: func(c *cobra.Command, args []string) error {
+			if latest {
+				if len(args) < 1 {
+					return fmt.Errorf("需要至少一个 tag")
+				}
+				return nil
+			}
+			if len(args) < 2 {
+				return fmt.Errorf("需要 run_id 和至少一个 tag，或使用 --latest")
+			}
+			return nil
+		},
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			targetID := runID
-			if isLatest {
+			targetID := args[0]
+			tags := args[1:]
+			if latest {
 				latest, err := store.GetLatestRun()
 				if err != nil {
 					return err
 				}
 				targetID = latest.ID
+				tags = args
 			}
 
-			for i := 1; i < len(args); i++ {
-				if err := store.AddTag(targetID, args[i]); err != nil {
+			for _, tag := range tags {
+				if err := store.AddTag(targetID, tag); err != nil {
 					return err
 				}
 			}
-			fmt.Printf("Added tags to %s: %v\n", targetID, args[1:])
+			fmt.Printf("Added tags to %s: %v\n", targetID, tags)
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&latest, "latest", false, "使用最新运行")
+	return c
 }
 
 // --- note ---
 
 func noteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "note <run_id|latest> \"text\"",
+	var latest bool
+	c := &cobra.Command{
+		Use:   "note <run_id> \"text\"",
 		Short: "添加备注",
-		Args:  cobra.ExactArgs(2),
+		Args: func(c *cobra.Command, args []string) error {
+			if latest {
+				if len(args) != 1 {
+					return fmt.Errorf("需要备注文本，且 --latest 不能和 run_id 同时使用")
+				}
+				return nil
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("需要 run_id 和备注文本，或使用 --latest")
+			}
+			return nil
+		},
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			targetID := runID
-			if isLatest {
+			targetID := args[0]
+			text := args[1]
+			if latest {
 				latest, err := store.GetLatestRun()
 				if err != nil {
 					return err
 				}
 				targetID = latest.ID
+				text = args[0]
 			}
 
-			if err := store.AddNote(targetID, args[1]); err != nil {
+			if err := store.AddNote(targetID, text); err != nil {
 				return err
 			}
 			fmt.Printf("Note added to %s\n", targetID)
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&latest, "latest", false, "使用最新运行")
+	return c
 }
 
 // --- rerun ---
 
 func rerunCmd() *cobra.Command {
 	var newCWD string
-	var dryRun, sameTags bool
+	var dryRun, sameTags, latest bool
 	var rerunName string
 
 	c := &cobra.Command{
-		Use:   "rerun <run_id|latest>",
+		Use:   "rerun <run_id>",
 		Short: "重新运行",
-		Args:  cobra.ExactArgs(1),
+		Args:  runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			var r *internal.Run
-			if isLatest {
-				r, err = store.GetLatestRun()
-			} else {
-				r, err = store.GetRun(runID)
-			}
+			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return fmt.Errorf("找不到 run: %w", err)
 			}
@@ -132,6 +156,7 @@ func rerunCmd() *cobra.Command {
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "只打印不执行")
 	c.Flags().BoolVar(&sameTags, "with-same-tags", false, "继承原 tags")
 	c.Flags().StringVar(&rerunName, "name", "", "指定新 run 名称")
+	c.Flags().BoolVar(&latest, "latest", false, "重新运行最新记录")
 	return c
 }
 

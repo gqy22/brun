@@ -65,9 +65,9 @@ brun run -n align-S1 -p wgs -t sample:S1 -- bwa mem -t 16 ref.fa reads.fq.gz
 brun list -p wgs
 
 # 3. 查看日志、输出和脚本快照
-brun logs latest --tail 100
-brun outputs latest
-brun script latest
+brun logs --latest --tail 100
+brun outputs --latest
+brun script --latest
 ```
 
 启动 Web Dashboard：
@@ -125,10 +125,10 @@ brun run -n train-model -p ml -- python3 train.py --epochs 100 --gpu 0
 brun list                          # 所有记录
 brun list -p wgs                  # 只看 wgs 项目
 brun list -s "bwa"                # 搜哪个 run 用了 bwa
-brun show latest                   # 最新一次详情
-brun logs latest --tail 100        # 看最后 100 行日志
-brun outputs latest                # 自动检测到的输出文件
-brun script latest                 # 查看运行时保存的脚本快照
+brun show --latest                 # 最新一次详情
+brun logs --latest --tail 100      # 看最后 100 行日志
+brun outputs --latest              # 自动检测到的输出文件
+brun script --latest               # 查看运行时保存的脚本快照
 ```
 
 ### 前台运行（调试时用）
@@ -173,15 +173,15 @@ brun list -S failed --since today   # 今天失败的
 ### 标签和备注
 
 ```bash
-brun tag latest important failed-debug
-brun note latest "STAR index 参数测试"
+brun tag --latest important failed-debug
+brun note --latest "STAR index 参数测试"
 ```
 
 ### 复跑
 
 ```bash
-brun rerun latest --dry-run        # 先看看会执行什么
-brun rerun latest                  # 确认后真正复跑
+brun rerun --latest --dry-run      # 先看看会执行什么
+brun rerun --latest                # 确认后真正复跑
 ```
 
 ## Web Dashboard
@@ -242,13 +242,14 @@ http://192.168.1.x:9213
 | `brun run -- <cmd>` | 执行并完整记录（默认后台） | `brun run -n job1 -p proj -t tagA -- cmd` |
 | `brun run -f -- <cmd>` | 前台运行 | `brun run -f -n job1 -- cmd` |
 | `brun list` | 列出运行历史 | `brun list -p proj -s "bwa" --since 1d` |
-| `brun show <id\|latest>` | 查看详情（含资源数据） | `brun show latest` |
-| `brun script <id\|latest>` | 查看脚本快照 | `brun script latest` |
-| `brun logs <id\|latest>` | 查看日志 | `brun logs latest --tail 50 --stderr` |
-| `brun outputs <id\|latest>` | 查看输出文件 | `brun outputs latest` |
-| `brun tag <id> TAG...` | 添加标签 | `brun tag latest sample:S1 production` |
-| `brun note <id> "text"` | 添加备注 | `brun note latest "参数说明"` |
-| `brun rerun <id\|latest>` | 重新运行 | `brun rerun latest --dry-run` |
+| `brun show <id>` | 查看详情（含资源数据） | `brun show --latest` |
+| `brun script <id>` | 查看脚本快照 | `brun script --latest` |
+| `brun logs <id>` | 查看日志 | `brun logs --latest --tail 50 --stderr` |
+| `brun outputs <id>` | 查看输出文件 | `brun outputs --latest` |
+| `brun diag <id>` | 查看运行诊断 | `brun diag --latest --all` |
+| `brun tag <id> TAG...` | 添加标签 | `brun tag --latest sample:S1 production` |
+| `brun note <id> "text"` | 添加备注 | `brun note --latest "参数说明"` |
+| `brun rerun <id>` | 重新运行 | `brun rerun --latest --dry-run` |
 | `brun web` | 启动 Web Dashboard | `brun web --port 8080` |
 | `brun init` | 生成 brun.yaml | `brun init my-proj` |
 | `brun clean` | 清理旧记录 | `brun clean --dry-run` |

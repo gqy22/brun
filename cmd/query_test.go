@@ -89,27 +89,6 @@ func TestFormatOutputs(t *testing.T) {
 	}
 }
 
-func TestResolveRunID_Latest(t *testing.T) {
-	// "latest" 应该被特殊处理
-	id, isLatest := ResolveRunID("latest")
-	if !isLatest {
-		t.Error("latest should be detected as latest flag")
-	}
-	if id != "" {
-		t.Errorf("latest id should be empty, got %q", id)
-	}
-}
-
-func TestResolveRunID_Specific(t *testing.T) {
-	id, isLatest := ResolveRunID("20260513-153012-a8f3c2")
-	if isLatest {
-		t.Error("specific ID should not be latest")
-	}
-	if id != "20260513-153012-a8f3c2" {
-		t.Errorf("id = %q, want 20260513-153012-a8f3c2", id)
-	}
-}
-
 func TestFormatSizeBytes(t *testing.T) {
 	tests := []struct {
 		bytes    int64

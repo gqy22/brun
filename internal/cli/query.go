@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,24 +70,19 @@ func listCmd() *cobra.Command {
 // --- show ---
 
 func showCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show <run_id|latest>",
+	var latest bool
+	c := &cobra.Command{
+		Use:   "show <run_id>",
 		Short: "显示运行详情",
-		Args:  cobra.ExactArgs(1),
+		Args:  runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			var r *internal.Run
-			if isLatest {
-				r, err = store.GetLatestRun()
-			} else {
-				r, err = store.GetRun(runID)
-			}
+			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return err
 			}
@@ -118,6 +114,30 @@ func showCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	return c
+}
+
+func runSelectorArgs(latest *bool) cobra.PositionalArgs {
+	return func(c *cobra.Command, args []string) error {
+		if latest != nil && *latest {
+			if len(args) != 0 {
+				return fmt.Errorf("--latest 不能和 run_id 同时使用")
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("需要 run_id，或使用 --latest")
+		}
+		return nil
+	}
+}
+
+func selectedRun(store *internal.Store, args []string, latest bool) (*internal.Run, error) {
+	if latest {
+		return store.GetLatestRun()
+	}
+	return store.GetRun(args[0])
 }
 
 func diagnosticSummaryLabel(runDir string) string {
@@ -156,28 +176,23 @@ func toCmdDiagnosticDetail(summary internal.DiagnosticSummary) cmd.DiagnosticDet
 
 func scriptCmd() *cobra.Command {
 	var pathOnly bool
+	var latest bool
 
 	c := &cobra.Command{
-		Use:   "script <run_id|latest>",
+		Use:   "script <run_id>",
 		Short: "查看运行时保存的脚本快照",
-		Example: `  brun script latest
+		Example: `  brun script --latest
   brun script 20260522-153012-a8f3c2
-  brun script latest --path`,
-		Args: cobra.ExactArgs(1),
+  brun script --latest --path`,
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			var r *internal.Run
-			if isLatest {
-				r, err = store.GetLatestRun()
-			} else {
-				r, err = store.GetRun(runID)
-			}
+			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return err
 			}
@@ -195,6 +210,7 @@ func scriptCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&pathOnly, "path", false, "只输出脚本快照路径")
+	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	return c
 }
 
@@ -203,40 +219,29 @@ func scriptCmd() *cobra.Command {
 func logsCmd() *cobra.Command {
 	var stdoutOnly, stderrOnly bool
 	var tailN int
-	var follow bool
+	var follow, latest bool
 
 	c := &cobra.Command{
-		Use:   "logs [run_id]",
+		Use:   "logs <run_id>",
 		Short: "查看运行日志",
-		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。不传参数默认查看最新运行。",
-		Example: `  # 查看最新运行的日志 (默认)
-  brun logs
-  brun logs latest
+		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。",
+		Example: `  # 查看最新运行的日志
+  brun logs --latest
 
   # 实时跟踪正在运行的命令输出
-  brun logs -f
+  brun logs --latest -f
 
   # 只看最后 50 行 stderr
   brun logs <run_id> --stderr --tail 50`,
-		Args: cobra.MaximumNArgs(1),
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
-			arg := "latest"
-			if len(args) > 0 {
-				arg = args[0]
-			}
-			runID, isLatest := cmd.ResolveRunID(arg)
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			var r *internal.Run
-			if isLatest {
-				r, err = store.GetLatestRun()
-			} else {
-				r, err = store.GetRun(runID)
-			}
+			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return err
 			}
@@ -278,6 +283,7 @@ func logsCmd() *cobra.Command {
 	c.Flags().BoolVar(&stderrOnly, "stderr", false, "只看 stderr")
 	c.Flags().IntVar(&tailN, "tail", 0, "最后 N 行")
 	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪 (类似 tail -f)")
+	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	return c
 }
 
@@ -355,24 +361,19 @@ func printLogSection(label, path string, tailN int) {
 // --- outputs ---
 
 func outputsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "outputs <run_id|latest>",
+	var latest bool
+	c := &cobra.Command{
+		Use:   "outputs <run_id>",
 		Short: "查看输出文件",
-		Args:  cobra.ExactArgs(1),
+		Args:  runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
-			runID, isLatest := cmd.ResolveRunID(args[0])
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			var r *internal.Run
-			if isLatest {
-				r, err = store.GetLatestRun()
-			} else {
-				r, err = store.GetRun(runID)
-			}
+			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return err
 			}
@@ -395,6 +396,69 @@ func outputsCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	return c
+}
+
+func diagCmd() *cobra.Command {
+	var latest, all, jsonOutput bool
+	c := &cobra.Command{
+		Use:   "diag <run_id>",
+		Short: "查看运行诊断",
+		Args:  runSelectorArgs(&latest),
+		RunE: func(c *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			r, err := selectedRun(store, args, latest)
+			if err != nil {
+				return err
+			}
+			events, err := internal.ReadDiagnostics(r.RunDir)
+			if err != nil {
+				return err
+			}
+			summary := internal.SummarizeDiagnostics(events)
+			visible := events
+			if !all {
+				visible = internal.DiagnosticWarnings(events)
+			}
+			if jsonOutput {
+				payload := struct {
+					RunID       string                     `json:"run_id"`
+					Summary     internal.DiagnosticSummary `json:"summary"`
+					Diagnostics []internal.DiagnosticEvent `json:"diagnostics"`
+				}{
+					RunID:       r.ID,
+					Summary:     summary,
+					Diagnostics: visible,
+				}
+				enc := json.NewEncoder(c.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(payload)
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Run ID: %s\n", r.ID)
+			fmt.Fprintf(c.OutOrStdout(), "Diagnostics: %d info, %d warning, %d error\n", summary.InfoCount, summary.WarningCount, summary.ErrorCount)
+			if len(visible) == 0 {
+				fmt.Fprintln(c.OutOrStdout(), "未找到诊断事件。")
+				return nil
+			}
+			for _, event := range visible {
+				fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s\n", event.Level, event.Code, event.Message)
+				if event.Detail != "" {
+					fmt.Fprintf(c.OutOrStdout(), "  %s\n", event.Detail)
+				}
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	c.Flags().BoolVar(&all, "all", false, "显示 info/warning/error 全部诊断")
+	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
+	return c
 }
 
 // --- tag ---
