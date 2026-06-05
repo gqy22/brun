@@ -47,7 +47,7 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	os.WriteFile(filepath.Join(runDir, "stdout.o"), []byte("line1\nline2\n"), 0644)
 	os.WriteFile(filepath.Join(runDir, "stderr.er"), []byte("err1\n"), 0644)
 
-	ws := NewWebServer(store, "127.0.0.1", 0, os.DirFS("."), os.DirFS("."))
+	ws := NewWebServer(store, "127.0.0.1", 0, os.DirFS("../web/templates"), os.DirFS("../web/static"))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/runs/{id}", ws.apiGetRun)

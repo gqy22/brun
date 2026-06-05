@@ -36,14 +36,12 @@ type WebServer struct {
 }
 
 func NewWebServer(store *internal.Store, addr string, port int, tmplFS, staticFS fs.FS) *WebServer {
-	tmplSub, _ := fs.Sub(tmplFS, "web/templates")
-	staticSub, _ := fs.Sub(staticFS, "web/static")
 	return &WebServer{
 		store:   store,
 		addr:    addr,
 		port:    port,
-		tmplDir: tmplSub,
-		static:  staticSub,
+		tmplDir: tmplFS,
+		static:  staticFS,
 	}
 }
 

@@ -5,7 +5,7 @@
 BINARY  := brun
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
-SRC     := .
+SRC     := ./cmd/brun
 BINDIR  := bin
 
 TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64

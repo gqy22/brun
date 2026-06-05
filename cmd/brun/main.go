@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,14 +14,9 @@ import (
 
 	"github.com/biotools/brun/cmd"
 	"github.com/biotools/brun/internal"
+	webassets "github.com/biotools/brun/web"
 	"github.com/spf13/cobra"
 )
-
-//go:embed web/templates/*
-var webTemplates embed.FS
-
-//go:embed web/static/*
-var webStatic embed.FS
 
 var version = "0.2.0"
 
@@ -1176,7 +1170,7 @@ func webCmd() *cobra.Command {
 				port = 9213
 			}
 
-			srv := cmd.NewWebServer(store, addr, port, webTemplates, webStatic)
+			srv := cmd.NewWebServer(store, addr, port, webassets.Templates, webassets.Static)
 			return srv.ListenAndServe()
 		},
 	}
