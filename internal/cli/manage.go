@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/biotools/brun/internal"
 	webassets "github.com/biotools/brun/web"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func tagCmd() *cobra.Command {
@@ -178,6 +181,111 @@ func cleanCmd() *cobra.Command {
 	c.Flags().StringVar(&keepTag, "keep-tag", "", "保留指定 tag 的 run")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "只显示将执行的操作")
 	return c
+}
+
+func repairIndexCmd() *cobra.Command {
+	var write bool
+	c := &cobra.Command{
+		Use:   "repair-index",
+		Short: "从 run 目录重建 SQLite 索引",
+		Long:  "扫描 runs 目录中的 metadata.yaml，重建 SQLite run 索引。默认只预览，使用 --write 才会写入数据库。",
+		RunE: func(c *cobra.Command, args []string) error {
+			runs, err := loadRunsFromMetadata(internal.RunsRoot())
+			if err != nil {
+				return err
+			}
+			if !write {
+				fmt.Printf("Found %d run metadata files. Use --write to rebuild the SQLite index.\n", len(runs))
+				return nil
+			}
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			repaired := 0
+			for _, run := range runs {
+				if _, err := store.GetRun(run.ID); err == nil {
+					continue
+				}
+				if err := store.CreateRun(run); err != nil {
+					return fmt.Errorf("rebuild run %s: %w", run.ID, err)
+				}
+				repaired++
+			}
+			fmt.Printf("Rebuilt %d missing run records from %d metadata files.\n", repaired, len(runs))
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&write, "write", false, "实际写入缺失的 run 记录")
+	return c
+}
+
+func loadRunsFromMetadata(root string) ([]*internal.Run, error) {
+	var runs []*internal.Run
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() || entry.Name() != "metadata.yaml" {
+			return nil
+		}
+		run, err := readRunMetadata(path)
+		if err != nil {
+			internal.Log().Warn("metadata_read_failed", "path", path, "error", err.Error())
+			return nil
+		}
+		run.RunDir = filepath.Dir(path)
+		runs = append(runs, run)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+type runMetadata struct {
+	ID         string `yaml:"id"`
+	Name       string `yaml:"name"`
+	Project    string `yaml:"project"`
+	Command    string `yaml:"command"`
+	Status     string `yaml:"status"`
+	ExitCode   int    `yaml:"exit_code"`
+	CWD        string `yaml:"cwd"`
+	StartedAt  string `yaml:"started_at"`
+	EndedAt    string `yaml:"ended_at"`
+	DurationMs int64  `yaml:"duration_ms"`
+	GitCommit  string `yaml:"git_commit"`
+	GitDirty   bool   `yaml:"git_dirty"`
+}
+
+func readRunMetadata(path string) (*internal.Run, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var meta runMetadata
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	if meta.ID == "" {
+		return nil, fmt.Errorf("missing id")
+	}
+	return &internal.Run{
+		ID:         meta.ID,
+		Name:       meta.Name,
+		Project:    meta.Project,
+		Command:    meta.Command,
+		Status:     meta.Status,
+		ExitCode:   meta.ExitCode,
+		CWD:        meta.CWD,
+		StartedAt:  meta.StartedAt,
+		EndedAt:    meta.EndedAt,
+		DurationMs: meta.DurationMs,
+		GitCommit:  meta.GitCommit,
+		GitDirty:   meta.GitDirty,
+	}, nil
 }
 
 // --- 辅助函数 ---

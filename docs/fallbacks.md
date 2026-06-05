@@ -293,6 +293,14 @@
 - 影响：未知进程会被展示成 worker，可能把 tee、tail、监控辅助进程和真正计算进程混在一起。
 - 建议：增加 `process` 或 `unknown` 角色，把默认分类从 worker 调整为 unknown；worker 只用于更明确的计算进程规则。
 
+### 36. SQLite 默认低同步作为快速索引
+
+- 类型：`explicit-performance-default`
+- 位置：`internal/store.go`
+- 当前行为：SQLite 默认使用 `BRUN_SQLITE_SYNC=off`，把数据库定位为快速索引层；run 目录中的 `metadata.yaml`、日志和诊断文件是主审计载体。用户可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full` 提升写入一致性。
+- 影响：极端情况下，例如机器断电或文件系统崩溃，最近一次 SQLite 写入可能丢失或损坏，但 run 目录仍保留审计文件。
+- 建议：保留该默认值以保证短任务体验，同时提供 `brun repair-index --write` 从 run 目录重建缺失索引。
+
 ## 建议清理顺序
 
 1. 先修复会造成用户看到错误标识的 fallback：后台 detached run 预生成 RunID。

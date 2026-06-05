@@ -166,6 +166,42 @@ func TestExecuteRunUsesProvidedRunID(t *testing.T) {
 	}
 }
 
+func TestReadRunMetadata(t *testing.T) {
+	runDir := fastTempDir(t)
+	path := filepath.Join(runDir, "metadata.yaml")
+	data := []byte("id: r1\nproject: p\ncommand: echo hi\nstatus: success\nexit_code: 0\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\nended_at: 2026-06-05T01:00:01Z\nduration_ms: 1000\n")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := readRunMetadata(path)
+	if err != nil {
+		t.Fatalf("readRunMetadata() error = %v", err)
+	}
+	if run.ID != "r1" || run.Project != "p" || run.Command != "echo hi" || run.DurationMs != 1000 {
+		t.Fatalf("unexpected run metadata: %+v", run)
+	}
+}
+
+func TestLoadRunsFromMetadata(t *testing.T) {
+	root := fastTempDir(t)
+	runDir := filepath.Join(root, "2026", "06", "05", "r1")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte("id: r1\ncommand: echo hi\nstatus: success\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := loadRunsFromMetadata(root)
+	if err != nil {
+		t.Fatalf("loadRunsFromMetadata() error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != "r1" || runs[0].RunDir != runDir {
+		t.Fatalf("runs = %+v, want r1 with runDir", runs)
+	}
+}
+
 func fastTempDir(t *testing.T) string {
 	t.Helper()
 	base := "/dev/shm"

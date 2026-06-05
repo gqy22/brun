@@ -88,6 +88,25 @@ func TestOpenStoreReadOnlyAllowsQueriesOnly(t *testing.T) {
 	}
 }
 
+func TestSQLiteSyncModeUsesEnvironment(t *testing.T) {
+	t.Setenv("BRUN_SQLITE_SYNC", "")
+	if got := sqliteSyncMode(); got != "OFF" {
+		t.Fatalf("default sqliteSyncMode() = %q, want OFF", got)
+	}
+	t.Setenv("BRUN_SQLITE_SYNC", "normal")
+	if got := sqliteSyncMode(); got != "NORMAL" {
+		t.Fatalf("sqliteSyncMode() = %q, want NORMAL", got)
+	}
+	t.Setenv("BRUN_SQLITE_SYNC", "full")
+	if got := sqliteSyncMode(); got != "FULL" {
+		t.Fatalf("sqliteSyncMode() = %q, want FULL", got)
+	}
+	t.Setenv("BRUN_SQLITE_SYNC", "bad")
+	if got := sqliteSyncMode(); got != "OFF" {
+		t.Fatalf("invalid sqliteSyncMode() = %q, want OFF", got)
+	}
+}
+
 func TestStore_UpdateRunStatus(t *testing.T) {
 	s := newTestStore(t)
 	defer s.Close()

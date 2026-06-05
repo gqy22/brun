@@ -24,11 +24,15 @@ func HomeDir() string {
 	return filepath.Join(os.Getenv("HOME"), ".bio-runner")
 }
 
+func RunsRoot() string {
+	return filepath.Join(HomeDir(), "runs")
+}
+
 func RunDir(runID string) string {
 	if len(runID) < 8 {
-		return filepath.Join(HomeDir(), "runs", runID)
+		return filepath.Join(RunsRoot(), runID)
 	}
-	return filepath.Join(HomeDir(), "runs", runID[0:4], runID[4:6], runID[6:8], runID)
+	return filepath.Join(RunsRoot(), runID[0:4], runID[4:6], runID[6:8], runID)
 }
 
 func EnsureDir(path string) error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -12,6 +13,7 @@ import (
 
 const maxRetries = 5
 const schemaVersion = 1
+const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
 
@@ -92,10 +94,23 @@ func sqliteDSN(path string, readOnly bool) string {
 		values.Set("mode", "ro")
 		values.Add("_pragma", "query_only(1)")
 	} else {
-		values.Add("_pragma", "synchronous(OFF)")
+		values.Add("_pragma", "synchronous("+sqliteSyncMode()+")")
 	}
 	uri := url.URL{Scheme: "file", Path: path, RawQuery: values.Encode()}
 	return uri.String()
+}
+
+func sqliteSyncMode() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BRUN_SQLITE_SYNC"))) {
+	case "", "off":
+		return "OFF"
+	case "normal":
+		return "NORMAL"
+	case "full":
+		return "FULL"
+	default:
+		return strings.ToUpper(defaultSQLiteSync)
+	}
 }
 
 func configureDB(db *sql.DB) {
