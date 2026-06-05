@@ -28,16 +28,18 @@ func TestStore_CreateRun(t *testing.T) {
 	defer s.Close()
 
 	run := &Run{
-		ID:        "20260513-153012-a8f3c2",
-		Name:      "test-run",
-		Project:   "test-project",
-		CWD:       "/home/user/project",
-		Command:   "python script.py",
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		RunDir:    "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
-		Hostname:  "devbox",
-		Username:  "user",
+		ID:            "20260513-153012-a8f3c2",
+		Name:          "test-run",
+		Project:       "test-project",
+		CWD:           "/home/user/project",
+		Command:       "python script.py",
+		Status:        "running",
+		StartedAt:     time.Now().UTC().Format(time.RFC3339),
+		RunDir:        "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
+		Hostname:      "devbox",
+		Username:      "user",
+		CWDSource:     "explicit",
+		ProjectSource: "config",
 	}
 
 	err := s.CreateRun(run)
@@ -54,6 +56,9 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if got.Command != run.Command {
 		t.Errorf("Command = %q, want %q", got.Command, run.Command)
+	}
+	if got.CWDSource != "explicit" || got.ProjectSource != "config" {
+		t.Errorf("sources = %q/%q, want explicit/config", got.CWDSource, got.ProjectSource)
 	}
 }
 
@@ -129,6 +134,34 @@ func TestStore_UpdateRunStatus(t *testing.T) {
 	}
 	if got.DurationMs != 30_000 {
 		t.Errorf("DurationMs = %d, want 30000", got.DurationMs)
+	}
+}
+
+func TestStore_UpdateRunDiagnostics(t *testing.T) {
+	s := newTestStore(t)
+	defer s.Close()
+
+	run := &Run{ID: "diag-001", Status: "running", CWD: "/tmp", Command: "echo hi", StartedAt: ts(), RunDir: "/tmp/r"}
+	if err := s.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.UpdateRunDiagnostics("diag-001", DiagnosticSummary{
+		WarningCount: 2,
+		ErrorCount:   1,
+		LastCode:     "metadata_write_failed",
+		LastAt:       "2026-06-05T01:02:03Z",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRunDiagnostics() error = %v", err)
+	}
+
+	got, err := s.GetRun("diag-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DiagWarningCount != 2 || got.DiagErrorCount != 1 || got.DiagLastCode != "metadata_write_failed" {
+		t.Fatalf("diagnostics = %+v", got)
 	}
 }
 

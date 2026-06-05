@@ -91,8 +91,8 @@ nohup bash test.sh > test.sh.o 2> test.sh.er &
 ```bash
 brun run -n my-script -- bash test.sh
 # → [nohup] PID=12345, RunID=20260604-153012-a8f3c2
-# → [nohup] stdout: ~/.bio-runner/runs/2026/06/04/20260604-153012-a8f3c2/stdout.o
-# → [nohup] stderr: ~/.bio-runner/runs/2026/06/04/20260604-153012-a8f3c2/stderr.er
+# → [nohup] stdout: ~/.brun/runs/2026/06/04/20260604-153012-a8f3c2/stdout.o
+# → [nohup] stderr: ~/.brun/runs/2026/06/04/20260604-153012-a8f3c2/stderr.er
 # → 关掉终端也没事，进程继续跑
 ```
 
@@ -277,7 +277,7 @@ brun run [options] -- <command...>
 brun **默认以 nohup 方式后台运行**：
 
 - 进程独立于终端，关闭 SSH/终端不会中断任务
-- 日志统一记录到 `~/.bio-runner/runs/YYYY/MM/DD/<run_id>/`
+- 日志统一记录到 `~/.brun/runs/YYYY/MM/DD/<run_id>/`
 - 启动后立即返回 PID，不阻塞终端
 - 子进程通过 `--foreground` 内部调用确保实际命令被执行
 
@@ -312,12 +312,31 @@ brun list --until 2026-05-10           # 某日期之前
 brun list -p wgs -s "mem" --since 3d    # 组合使用
 ```
 
+时间过滤只接受 `YYYY-MM-DD`、RFC3339、`today`、`Nh`、`Nd`、`Nw`，格式错误会直接报错。
+
+面向脚本和智能体时，优先使用 JSON 输出：
+
+```bash
+brun list --json
+brun show --latest --json
+brun outputs --latest --json
+brun diag --latest --json
+```
+
+可恢复错误会尽量输出稳定的 `Code` 和下一步 `Hint`：
+
+```text
+Error: --since 无效时间 "nope"
+Code: invalid_time_filter
+Hint: 使用 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw
+```
+
 ## 数据存储
 
-默认存储在 `~/.bio-runner/`，可通过 `BRUN_HOME` 环境变量覆盖：
+默认存储在 `~/.brun/`，可通过 `BRUN_HOME` 环境变量覆盖：
 
 ```
-~/.bio-runner/
+~/.brun/
 ├── db.sqlite              # SQLite 数据库
 ├── brun.log               # brun 自身日志
 └── runs/

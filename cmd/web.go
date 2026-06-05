@@ -127,10 +127,6 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 
 	rows := make([]runRow, len(runs))
 	for i, run := range runs {
-		diagnosticSummary, err := internal.ReadDiagnosticSummary(run.RunDir)
-		if err != nil {
-			internal.Log().Warn("diagnostic_summary_read_failed", "run_id", run.ID, "error", err.Error())
-		}
 		rows[i] = runRow{
 			ID:                run.ID,
 			Name:              run.Name,
@@ -139,7 +135,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 			Duration:          DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
 			Command:           truncate(run.Command, 80),
 			StartedAt:         run.StartedAt,
-			DiagnosticSummary: diagnosticSummary,
+			DiagnosticSummary: internal.DiagnosticSummaryFromRun(run),
 		}
 	}
 	jsonResponse(w, rows)
@@ -162,6 +158,9 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		diagnostics = nil
 	}
 	diagnosticSummary := internal.SummarizeDiagnostics(diagnostics)
+	if len(diagnostics) == 0 {
+		diagnosticSummary = internal.DiagnosticSummaryFromRun(run)
+	}
 	processSummary := RunProcessSummary{}
 	if run.Status == "running" {
 		processSummary = s.buildRunProcessSummary(run)
@@ -171,7 +170,9 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"id":                 run.ID,
 		"name":               run.Name,
 		"project":            run.Project,
+		"project_source":     run.ProjectSource,
 		"cwd":                run.CWD,
+		"cwd_source":         run.CWDSource,
 		"command":            run.Command,
 		"script":             script.Content,
 		"script_name":        script.Name,

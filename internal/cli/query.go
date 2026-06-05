@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 func listCmd() *cobra.Command {
 	var project, status, tag, search, since, until string
 	var limit int
+	var jsonOutput bool
 
 	cc := &cobra.Command{
 		Use:   "list",
@@ -29,10 +31,18 @@ func listCmd() *cobra.Command {
 
 			sinceVal, untilVal := since, until
 			if since != "" {
-				sinceVal = parseTimeFilter(since)
+				var parseErr error
+				sinceVal, parseErr = parseTimeFilter(since)
+				if parseErr != nil {
+					return cliError("invalid_time_filter", "--since "+parseErr.Error(), "使用 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw", parseErr)
+				}
 			}
 			if until != "" {
-				untilVal = parseTimeFilter(until)
+				var parseErr error
+				untilVal, parseErr = parseTimeFilter(until)
+				if parseErr != nil {
+					return cliError("invalid_time_filter", "--until "+parseErr.Error(), "使用 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw", parseErr)
+				}
 			}
 
 			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal)
@@ -40,9 +50,19 @@ func listCmd() *cobra.Command {
 				return err
 			}
 
+			if jsonOutput {
+				payload := make([]runJSONPayload, len(runs))
+				for i, r := range runs {
+					payload[i] = runJSON(r, nil, "")
+				}
+				enc := json.NewEncoder(c.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(payload)
+			}
+
 			rows := make([]cmd.RunRow, len(runs))
 			for i, r := range runs {
-				diag := diagnosticSummaryLabel(r.RunDir)
+				diag := diagnosticSummaryLabel(r)
 				rows[i] = cmd.RunRow{
 					ID:         r.ID,
 					Name:       r.Name,
@@ -61,9 +81,10 @@ func listCmd() *cobra.Command {
 	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (success/failed/running)")
 	cc.Flags().StringVarP(&tag, "tag", "t", "", "按 tag 过滤")
 	cc.Flags().StringVarP(&search, "search", "s", "", "在命令/名称中搜索关键词")
-	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (如: 2026-05-13, 1h, today)")
-	cc.Flags().StringVar(&until, "until", "", "显示此时间之前的记录")
+	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
+	cc.Flags().StringVar(&until, "until", "", "显示此时间之前的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
 	cc.Flags().IntVar(&limit, "limit", 20, "限制数量")
+	cc.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
 	return cc
 }
 
@@ -71,10 +92,13 @@ func listCmd() *cobra.Command {
 
 func showCmd() *cobra.Command {
 	var latest bool
+	var jsonOutput bool
 	c := &cobra.Command{
 		Use:   "show <run_id>",
 		Short: "显示运行详情",
-		Args:  runSelectorArgs(&latest),
+		Example: `  brun show 20260605-145615-fed727
+  brun show --latest`,
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -84,53 +108,132 @@ func showCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return err
+				return runLookupError(err)
 			}
 
 			tags, _ := store.GetTags(r.ID)
 			note, _ := store.GetNote(r.ID)
+			if jsonOutput {
+				payload := runJSON(r, tags, note)
+				enc := json.NewEncoder(c.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(payload)
+			}
 
 			detail := &cmd.RunDetail{
-				ID:        r.ID,
-				Name:      r.Name,
-				Project:   r.Project,
-				Status:    r.Status,
-				Command:   r.Command,
-				CWD:       r.CWD,
-				StartedAt: r.StartedAt,
-				EndedAt:   r.EndedAt,
-				Duration:  cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
-				ExitCode:  r.ExitCode,
-				PeakRSSKB: r.PeakRSSKB,
-				CPUTimeMs: r.CPUTimeMs,
-				GitRepo:   r.GitRepo,
-				GitCommit: r.GitCommit,
-				GitDirty:  r.GitDirty,
-				Tags:      tags,
-				Note:      note,
-				Diag:      toCmdDiagnosticDetail(readDiagnosticSummaryQuiet(r.RunDir)),
+				ID:            r.ID,
+				Name:          r.Name,
+				Project:       r.Project,
+				Status:        r.Status,
+				Command:       r.Command,
+				CWD:           r.CWD,
+				StartedAt:     r.StartedAt,
+				EndedAt:       r.EndedAt,
+				Duration:      cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
+				ExitCode:      r.ExitCode,
+				PeakRSSKB:     r.PeakRSSKB,
+				CPUTimeMs:     r.CPUTimeMs,
+				GitRepo:       r.GitRepo,
+				GitCommit:     r.GitCommit,
+				GitDirty:      r.GitDirty,
+				Tags:          tags,
+				Note:          note,
+				Diag:          toCmdDiagnosticDetail(internal.DiagnosticSummaryFromRun(r)),
+				CWDSource:     r.CWDSource,
+				ProjectSource: r.ProjectSource,
 			}
 			fmt.Print(cmd.FormatShow(detail))
 			return nil
 		},
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
 	return c
+}
+
+type runJSONPayload struct {
+	ID                string                     `json:"id"`
+	Name              string                     `json:"name,omitempty"`
+	Project           string                     `json:"project"`
+	ProjectSource     string                     `json:"project_source,omitempty"`
+	CWD               string                     `json:"cwd"`
+	CWDSource         string                     `json:"cwd_source,omitempty"`
+	Command           string                     `json:"command"`
+	Status            string                     `json:"status"`
+	ExitCode          int                        `json:"exit_code"`
+	StartedAt         string                     `json:"started_at"`
+	EndedAt           string                     `json:"ended_at,omitempty"`
+	DurationMs        int64                      `json:"duration_ms"`
+	RunDir            string                     `json:"run_dir"`
+	Hostname          string                     `json:"hostname,omitempty"`
+	Username          string                     `json:"username,omitempty"`
+	GitRepo           string                     `json:"git_repo,omitempty"`
+	GitBranch         string                     `json:"git_branch,omitempty"`
+	GitCommit         string                     `json:"git_commit,omitempty"`
+	GitDirty          bool                       `json:"git_dirty"`
+	PeakRSSKB         int64                      `json:"peak_rss_kb"`
+	CPUTimeMs         int64                      `json:"cpu_time_ms"`
+	Tags              []string                   `json:"tags,omitempty"`
+	Note              string                     `json:"note,omitempty"`
+	DiagnosticSummary internal.DiagnosticSummary `json:"diagnostic_summary"`
+}
+
+func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
+	return runJSONPayload{
+		ID:                r.ID,
+		Name:              r.Name,
+		Project:           r.Project,
+		ProjectSource:     r.ProjectSource,
+		CWD:               r.CWD,
+		CWDSource:         r.CWDSource,
+		Command:           r.Command,
+		Status:            r.Status,
+		ExitCode:          r.ExitCode,
+		StartedAt:         r.StartedAt,
+		EndedAt:           r.EndedAt,
+		DurationMs:        r.DurationMs,
+		RunDir:            r.RunDir,
+		Hostname:          r.Hostname,
+		Username:          r.Username,
+		GitRepo:           r.GitRepo,
+		GitBranch:         r.GitBranch,
+		GitCommit:         r.GitCommit,
+		GitDirty:          r.GitDirty,
+		PeakRSSKB:         r.PeakRSSKB,
+		CPUTimeMs:         r.CPUTimeMs,
+		Tags:              tags,
+		Note:              note,
+		DiagnosticSummary: internal.DiagnosticSummaryFromRun(r),
+	}
 }
 
 func runSelectorArgs(latest *bool) cobra.PositionalArgs {
 	return func(c *cobra.Command, args []string) error {
 		if latest != nil && *latest {
 			if len(args) != 0 {
-				return fmt.Errorf("--latest 不能和 run_id 同时使用")
+				return cliError("ambiguous_run_selector", "--latest 不能和 run_id 同时使用", "删除 run_id 参数，或删除 --latest 后指定一个真实 run_id", nil)
 			}
 			return nil
 		}
 		if len(args) != 1 {
-			return fmt.Errorf("需要 run_id，或使用 --latest")
+			return cliError("missing_run_selector", "需要 run_id，或使用 --latest", "先运行 brun list --limit 5 查看 run_id，或使用 --latest", nil)
 		}
 		return nil
 	}
+}
+
+func runLookupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no runs found") {
+		return cliError("no_runs_found", msg, "先使用 brun run -- <command> 创建运行记录", err)
+	}
+	if strings.Contains(msg, "not found") {
+		return cliError("run_not_found", msg, "运行 brun list --limit 20 查看可用 run_id，或使用 --latest", err)
+	}
+	return err
 }
 
 func selectedRun(store *internal.Store, args []string, latest bool) (*internal.Run, error) {
@@ -140,8 +243,8 @@ func selectedRun(store *internal.Store, args []string, latest bool) (*internal.R
 	return store.GetRun(args[0])
 }
 
-func diagnosticSummaryLabel(runDir string) string {
-	summary := readDiagnosticSummaryQuiet(runDir)
+func diagnosticSummaryLabel(r *internal.Run) string {
+	summary := internal.DiagnosticSummaryFromRun(r)
 	if summary.ErrorCount > 0 {
 		return fmt.Sprintf("E%d", summary.ErrorCount)
 	}
@@ -149,15 +252,6 @@ func diagnosticSummaryLabel(runDir string) string {
 		return fmt.Sprintf("W%d", summary.WarningCount)
 	}
 	return "-"
-}
-
-func readDiagnosticSummaryQuiet(runDir string) internal.DiagnosticSummary {
-	summary, err := internal.ReadDiagnosticSummary(runDir)
-	if err != nil {
-		internal.Log().Warn("diagnostic_summary_read_failed", "run_dir", runDir, "error", err.Error())
-		return internal.DiagnosticSummary{}
-	}
-	return summary
 }
 
 func toCmdDiagnosticDetail(summary internal.DiagnosticSummary) cmd.DiagnosticDetail {
@@ -194,7 +288,7 @@ func scriptCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return err
+				return runLookupError(err)
 			}
 
 			snapshot, err := cmd.ReadScriptSnapshot(r.RunDir)
@@ -243,7 +337,7 @@ func logsCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return err
+				return runLookupError(err)
 			}
 
 			// 确定要查看的文件
@@ -362,10 +456,13 @@ func printLogSection(label, path string, tailN int) {
 
 func outputsCmd() *cobra.Command {
 	var latest bool
+	var jsonOutput bool
 	c := &cobra.Command{
 		Use:   "outputs <run_id>",
 		Short: "查看输出文件",
-		Args:  runSelectorArgs(&latest),
+		Example: `  brun outputs 20260605-145615-fed727
+  brun outputs --latest`,
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -375,12 +472,30 @@ func outputsCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return err
+				return runLookupError(err)
 			}
 
 			arts, err := store.GetArtifacts(r.ID)
 			if err != nil {
 				return err
+			}
+
+			if jsonOutput {
+				payload := struct {
+					RunID     string         `json:"run_id"`
+					Project   string         `json:"project"`
+					Artifacts []artifactJSON `json:"artifacts"`
+				}{
+					RunID:   r.ID,
+					Project: r.Project,
+				}
+				payload.Artifacts = make([]artifactJSON, len(arts))
+				for i, artifact := range arts {
+					payload.Artifacts[i] = artifactJSONFromInternal(artifact)
+				}
+				enc := json.NewEncoder(c.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(payload)
 			}
 
 			rows := make([]cmd.ArtifactRow, len(arts))
@@ -397,7 +512,41 @@ func outputsCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
 	return c
+}
+
+type artifactJSON struct {
+	ID            int64  `json:"id"`
+	RunID         string `json:"run_id"`
+	Kind          string `json:"kind"`
+	Status        string `json:"status"`
+	Path          string `json:"path"`
+	AbsPath       string `json:"abs_path,omitempty"`
+	StoredPath    string `json:"stored_path,omitempty"`
+	Size          int64  `json:"size_bytes"`
+	SHA256        string `json:"sha256,omitempty"`
+	Mtime         string `json:"mtime,omitempty"`
+	CaptureMethod string `json:"capture_method,omitempty"`
+}
+
+func artifactJSONFromInternal(a *internal.Artifact) artifactJSON {
+	if a == nil {
+		return artifactJSON{}
+	}
+	return artifactJSON{
+		ID:            a.ID,
+		RunID:         a.RunID,
+		Kind:          a.Kind,
+		Status:        a.Status,
+		Path:          a.Path,
+		AbsPath:       a.AbsPath,
+		StoredPath:    a.StoredPath,
+		Size:          a.Size,
+		SHA256:        a.SHA256,
+		Mtime:         a.Mtime,
+		CaptureMethod: a.CaptureMethod,
+	}
 }
 
 func diagCmd() *cobra.Command {
@@ -405,7 +554,12 @@ func diagCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "diag <run_id>",
 		Short: "查看运行诊断",
-		Args:  runSelectorArgs(&latest),
+		Long:  "查看运行诊断。默认只显示 warning/error；使用 --all 显示 info/warning/error；使用 --json 输出机器可读结果。",
+		Example: `  brun diag 20260605-145615-fed727
+  brun diag --latest
+  brun diag --latest --all
+  brun diag --latest --json`,
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -415,7 +569,7 @@ func diagCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return err
+				return runLookupError(err)
 			}
 			events, err := internal.ReadDiagnostics(r.RunDir)
 			if err != nil {
@@ -463,39 +617,48 @@ func diagCmd() *cobra.Command {
 
 // --- tag ---
 
-func parseTimeFilter(s string) string {
+func parseTimeFilter(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return ""
+		return "", nil
 	}
 	// 尝试直接解析为日期
 	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t.UTC().Format(time.RFC3339)
+		return t.UTC().Format(time.RFC3339), nil
 	}
 	if _, err := time.Parse(time.RFC3339, s); err == nil {
-		return s
+		return s, nil
 	}
 
 	// 相对时间
 	now := time.Now().UTC()
-	switch {
-	case s == "today":
-		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339)
-	case strings.HasSuffix(s, "h"):
-		var n int
-		fmt.Sscanf(s, "%d", &n)
-		return now.Add(-time.Duration(n) * time.Hour).Format(time.RFC3339)
-	case strings.HasSuffix(s, "d"):
-		var n int
-		fmt.Sscanf(s, "%d", &n)
-		return now.Add(-time.Duration(n) * 24 * time.Hour).Format(time.RFC3339)
-	case strings.HasSuffix(s, "w"):
-		var n int
-		fmt.Sscanf(s, "%d", &n)
-		return now.Add(-time.Duration(n) * 7 * 24 * time.Hour).Format(time.RFC3339)
-	default:
-		return s // 原样返回，让 SQL 查询自然失败
+	if s == "today" {
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339), nil
 	}
+	if len(s) < 2 {
+		return "", invalidTimeFilterError(s)
+	}
+	unit := s[len(s)-1]
+	if unit != 'h' && unit != 'd' && unit != 'w' {
+		return "", invalidTimeFilterError(s)
+	}
+	n, err := strconv.Atoi(s[:len(s)-1])
+	if err != nil || n <= 0 {
+		return "", invalidTimeFilterError(s)
+	}
+	switch unit {
+	case 'h':
+		return now.Add(-time.Duration(n) * time.Hour).Format(time.RFC3339), nil
+	case 'd':
+		return now.Add(-time.Duration(n) * 24 * time.Hour).Format(time.RFC3339), nil
+	case 'w':
+		return now.Add(-time.Duration(n) * 7 * 24 * time.Hour).Format(time.RFC3339), nil
+	}
+	return "", invalidTimeFilterError(s)
+}
+
+func invalidTimeFilterError(s string) error {
+	return fmt.Errorf("无效时间 %q，支持 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw", s)
 }
 
 // --- web ---

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,6 +159,60 @@ func TestDiagCmdShowsWarningsByDefault(t *testing.T) {
 	}
 }
 
+func TestShowCmdJSONOutput(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+
+	runID := "20260605-153012-json01"
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.CreateRun(&internal.Run{
+		ID:            runID,
+		Project:       "proj",
+		ProjectSource: "explicit",
+		CWD:           "/tmp",
+		CWDSource:     "explicit",
+		Command:       "echo hi",
+		Status:        "success",
+		StartedAt:     time.Now().UTC().Format(time.RFC3339),
+		RunDir:        filepath.Join(home, "runs", "x"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	c := showCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetErr(&out)
+	c.SetArgs([]string{runID, "--json"})
+
+	if err := c.Execute(); err != nil {
+		t.Fatalf("showCmd() error = %v", err)
+	}
+	var resp struct {
+		ID            string `json:"id"`
+		ProjectSource string `json:"project_source"`
+		CWDSource     string `json:"cwd_source"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("json decode: %v\n%s", err, out.String())
+	}
+	if resp.ID != runID || resp.ProjectSource != "explicit" || resp.CWDSource != "explicit" {
+		t.Fatalf("unexpected show json: %+v", resp)
+	}
+}
+
+func TestFormatCLIErrorIncludesCodeAndHint(t *testing.T) {
+	err := cliError("invalid_time_filter", "无效时间", "使用 today", nil)
+	out := formatCLIError(err)
+	if !strings.Contains(out, "Code: invalid_time_filter") || !strings.Contains(out, "Hint: 使用 today") {
+		t.Fatalf("formatted error missing code/hint: %s", out)
+	}
+}
+
 func TestExecuteRunWritesDiagnostics(t *testing.T) {
 	home := fastTempDir(t)
 	t.Setenv("BRUN_HOME", home)
@@ -197,6 +252,38 @@ func TestExecuteRunWritesDiagnostics(t *testing.T) {
 	}
 	if !sawScriptMissing {
 		t.Fatalf("missing script_snapshot_missing event: %+v", events)
+	}
+}
+
+func TestExecuteRunFailsOnInvalidConfig(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	cwd := fastTempDir(t)
+	if err := os.WriteFile(filepath.Join(cwd, "brun.yaml"), []byte("project: [bad\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "")
+	if err == nil || !strings.Contains(err.Error(), "项目配置错误") {
+		t.Fatalf("executeRun() error = %v, want config error", err)
+	}
+}
+
+func TestParseTimeFilterRejectsInvalidInput(t *testing.T) {
+	if _, err := parseTimeFilter("yesterday-ish"); err == nil {
+		t.Fatal("parseTimeFilter() expected error")
+	}
+	if _, err := parseTimeFilter("0d"); err == nil {
+		t.Fatal("parseTimeFilter() expected error for 0d")
+	}
+}
+
+func TestParseTimeFilterAcceptsSupportedInputs(t *testing.T) {
+	inputs := []string{"2026-06-05", "2026-06-05T01:02:03Z", "today", "1h", "2d", "3w"}
+	for _, input := range inputs {
+		if got, err := parseTimeFilter(input); err != nil || got == "" {
+			t.Fatalf("parseTimeFilter(%q) = %q, %v", input, got, err)
+		}
 	}
 }
 

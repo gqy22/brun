@@ -20,24 +20,26 @@ type RunRow struct {
 }
 
 type RunDetail struct {
-	ID        string
-	Name      string
-	Project   string
-	Status    string
-	Command   string
-	CWD       string
-	StartedAt string
-	EndedAt   string
-	Duration  string
-	ExitCode  int
-	PeakRSSKB int64
-	CPUTimeMs int64
-	GitRepo   string
-	GitCommit string
-	GitDirty  bool
-	Tags      []string
-	Note      string
-	Diag      DiagnosticDetail
+	ID            string
+	Name          string
+	Project       string
+	ProjectSource string
+	Status        string
+	Command       string
+	CWD           string
+	CWDSource     string
+	StartedAt     string
+	EndedAt       string
+	Duration      string
+	ExitCode      int
+	PeakRSSKB     int64
+	CPUTimeMs     int64
+	GitRepo       string
+	GitCommit     string
+	GitDirty      bool
+	Tags          []string
+	Note          string
+	Diag          DiagnosticDetail
 }
 
 type DiagnosticDetail struct {
@@ -127,9 +129,15 @@ func FormatShow(r *RunDetail) string {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Name:"), r.Name)
 	}
 	fmt.Fprintf(&b, "%s  %s\n", Bold("Project:"), r.Project)
+	if r.ProjectSource != "" {
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Project Source:"), r.ProjectSource)
+	}
 	fmt.Fprintf(&b, "%s  %s\n", Bold("Status:"), StatusColor(r.Status))
 	fmt.Fprintf(&b, "%s  %s\n", Bold("Command:"), r.Command)
 	fmt.Fprintf(&b, "%s  %s\n", Bold("CWD:"), Dim(r.CWD))
+	if r.CWDSource != "" {
+		fmt.Fprintf(&b, "%s  %s\n", Bold("CWD Source:"), r.CWDSource)
+	}
 	if r.StartedAt != "" {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Started:"), r.StartedAt)
 	}

@@ -31,11 +31,18 @@ type DiagnosticSummary struct {
 }
 
 type DiagnosticWriter struct {
-	path string
+	path        string
+	afterRecord func()
 }
 
 func NewDiagnosticWriter(runDir string) *DiagnosticWriter {
 	return &DiagnosticWriter{path: filepath.Join(runDir, DiagnosticsFileName)}
+}
+
+func (w *DiagnosticWriter) SetAfterRecord(fn func()) {
+	if w != nil {
+		w.afterRecord = fn
+	}
 }
 
 func (w *DiagnosticWriter) Info(code, message, detail string) {
@@ -70,6 +77,10 @@ func (w *DiagnosticWriter) record(level, code, message, detail, source string) {
 	defer f.Close()
 	if err := json.NewEncoder(f).Encode(event); err != nil {
 		Log().Warn("diagnostic_encode_failed", "path", w.path, "error", err.Error())
+		return
+	}
+	if w.afterRecord != nil {
+		w.afterRecord()
 	}
 }
 
@@ -96,6 +107,18 @@ func ReadDiagnostics(runDir string) ([]DiagnosticEvent, error) {
 		return nil, err
 	}
 	return events, nil
+}
+
+func DiagnosticSummaryFromRun(r *Run) DiagnosticSummary {
+	if r == nil {
+		return DiagnosticSummary{}
+	}
+	return DiagnosticSummary{
+		WarningCount: r.DiagWarningCount,
+		ErrorCount:   r.DiagErrorCount,
+		LastCode:     r.DiagLastCode,
+		LastAt:       r.DiagLastAt,
+	}
 }
 
 func ReadDiagnosticSummary(runDir string) (DiagnosticSummary, error) {

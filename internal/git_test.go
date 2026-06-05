@@ -33,7 +33,7 @@ func TestGenerateRunID_Uniqueness(t *testing.T) {
 func TestHomeDir_Default(t *testing.T) {
 	os.Unsetenv("BRUN_HOME")
 	dir := HomeDir()
-	expected := filepath.Join(os.Getenv("HOME"), ".bio-runner")
+	expected := filepath.Join(os.Getenv("HOME"), ".brun")
 	if dir != expected {
 		t.Errorf("HomeDir() = %q, want %q", dir, expected)
 	}
@@ -81,22 +81,34 @@ func TestDetectProject_FromYAML(t *testing.T) {
 	yamlPath := filepath.Join(tmp, "brun.yaml")
 	os.WriteFile(yamlPath, []byte("project: my-rnaseq\n"), 0644)
 
-	project, root := DetectProject(tmp)
+	project, root, source, err := DetectProject(tmp)
+	if err != nil {
+		t.Fatalf("DetectProject() error = %v", err)
+	}
 	if project != "my-rnaseq" {
 		t.Errorf("DetectProject() project = %q, want %q", project, "my-rnaseq")
 	}
 	if root != tmp {
 		t.Errorf("DetectProject() root = %q, want %q", root, tmp)
 	}
+	if source != "config" {
+		t.Errorf("DetectProject() source = %q, want config", source)
+	}
 }
 
 func TestDetectProject_FromDirName(t *testing.T) {
 	tmp := t.TempDir()
 	// 没有 brun.yaml，没有 git，应该返回目录名
-	project, _ := DetectProject(tmp)
+	project, _, source, err := DetectProject(tmp)
+	if err != nil {
+		t.Fatalf("DetectProject() error = %v", err)
+	}
 	base := filepath.Base(tmp)
 	if project != base {
 		t.Errorf("DetectProject() project = %q, want %q (dir name)", project, base)
+	}
+	if source != "inferred" {
+		t.Errorf("DetectProject() source = %q, want inferred", source)
 	}
 }
 
@@ -105,9 +117,25 @@ func TestDetectProject_Priority_CLIOverYAML(t *testing.T) {
 	yamlPath := filepath.Join(tmp, "brun.yaml")
 	os.WriteFile(yamlPath, []byte("project: yaml-project\n"), 0644)
 
-	project, _ := DetectProject(tmp, WithCLIProject("cli-project"))
+	project, _, source, err := DetectProject(tmp, WithCLIProject("cli-project"))
+	if err != nil {
+		t.Fatalf("DetectProject() error = %v", err)
+	}
 	if project != "cli-project" {
 		t.Errorf("CLI project should override YAML: got %q, want %q", project, "cli-project")
+	}
+	if source != "explicit" {
+		t.Errorf("DetectProject() source = %q, want explicit", source)
+	}
+}
+
+func TestDetectProject_InvalidYAMLReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	yamlPath := filepath.Join(tmp, "brun.yaml")
+	os.WriteFile(yamlPath, []byte("project: [bad\n"), 0644)
+
+	if _, _, _, err := DetectProject(tmp); err == nil {
+		t.Fatal("DetectProject() expected parse error")
 	}
 }
 

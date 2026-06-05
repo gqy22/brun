@@ -255,6 +255,12 @@ func BuildMetadataYAML(run *internal.Run) string {
 	fmt.Fprintf(&b, "status: %s\n", run.Status)
 	fmt.Fprintf(&b, "exit_code: %d\n", run.ExitCode)
 	fmt.Fprintf(&b, "cwd: %s\n", run.CWD)
+	if run.CWDSource != "" {
+		fmt.Fprintf(&b, "cwd_source: %s\n", run.CWDSource)
+	}
+	if run.ProjectSource != "" {
+		fmt.Fprintf(&b, "project_source: %s\n", run.ProjectSource)
+	}
 	if run.StartedAt != "" {
 		fmt.Fprintf(&b, "started_at: %s\n", run.StartedAt)
 	}
@@ -269,6 +275,18 @@ func BuildMetadataYAML(run *internal.Run) string {
 	}
 	if run.GitDirty {
 		b.WriteString("git_dirty: true\n")
+	}
+	if run.DiagWarningCount > 0 {
+		fmt.Fprintf(&b, "diag_warning_count: %d\n", run.DiagWarningCount)
+	}
+	if run.DiagErrorCount > 0 {
+		fmt.Fprintf(&b, "diag_error_count: %d\n", run.DiagErrorCount)
+	}
+	if run.DiagLastCode != "" {
+		fmt.Fprintf(&b, "diag_last_code: %s\n", run.DiagLastCode)
+	}
+	if run.DiagLastAt != "" {
+		fmt.Fprintf(&b, "diag_last_at: %s\n", run.DiagLastAt)
 	}
 	return b.String()
 }

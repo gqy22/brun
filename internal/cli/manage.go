@@ -19,6 +19,8 @@ func tagCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "tag <run_id> TAG...",
 		Short: "添加标签",
+		Example: `  brun tag 20260605-145615-fed727 sample:S1 production
+  brun tag --latest sample:S1 production`,
 		Args: func(c *cobra.Command, args []string) error {
 			if latest {
 				if len(args) < 1 {
@@ -69,6 +71,8 @@ func noteCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "note <run_id> \"text\"",
 		Short: "添加备注",
+		Example: `  brun note 20260605-145615-fed727 "STAR index 参数测试"
+  brun note --latest "STAR index 参数测试"`,
 		Args: func(c *cobra.Command, args []string) error {
 			if latest {
 				if len(args) != 1 {
@@ -120,7 +124,10 @@ func rerunCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "rerun <run_id>",
 		Short: "重新运行",
-		Args:  runSelectorArgs(&latest),
+		Example: `  brun rerun 20260605-145615-fed727 --dry-run
+  brun rerun --latest --dry-run
+  brun rerun --latest --cwd /data/project`,
+		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -130,7 +137,7 @@ func rerunCmd() *cobra.Command {
 
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
-				return fmt.Errorf("找不到 run: %w", err)
+				return runLookupError(err)
 			}
 
 			cmdStr, execCWD := cmd.BuildRerunCommand(r, newCWD, sameTags)
@@ -214,6 +221,8 @@ func repairIndexCmd() *cobra.Command {
 		Use:   "repair-index",
 		Short: "从 run 目录重建 SQLite 索引",
 		Long:  "扫描 runs 目录中的 metadata.yaml，重建 SQLite run 索引。默认只预览，使用 --write 才会写入数据库。",
+		Example: `  brun repair-index
+  brun repair-index --write`,
 		RunE: func(c *cobra.Command, args []string) error {
 			runs, err := loadRunsFromMetadata(internal.RunsRoot())
 			if err != nil {
@@ -271,18 +280,24 @@ func loadRunsFromMetadata(root string) ([]*internal.Run, error) {
 }
 
 type runMetadata struct {
-	ID         string `yaml:"id"`
-	Name       string `yaml:"name"`
-	Project    string `yaml:"project"`
-	Command    string `yaml:"command"`
-	Status     string `yaml:"status"`
-	ExitCode   int    `yaml:"exit_code"`
-	CWD        string `yaml:"cwd"`
-	StartedAt  string `yaml:"started_at"`
-	EndedAt    string `yaml:"ended_at"`
-	DurationMs int64  `yaml:"duration_ms"`
-	GitCommit  string `yaml:"git_commit"`
-	GitDirty   bool   `yaml:"git_dirty"`
+	ID               string `yaml:"id"`
+	Name             string `yaml:"name"`
+	Project          string `yaml:"project"`
+	Command          string `yaml:"command"`
+	Status           string `yaml:"status"`
+	ExitCode         int    `yaml:"exit_code"`
+	CWD              string `yaml:"cwd"`
+	StartedAt        string `yaml:"started_at"`
+	EndedAt          string `yaml:"ended_at"`
+	DurationMs       int64  `yaml:"duration_ms"`
+	GitCommit        string `yaml:"git_commit"`
+	GitDirty         bool   `yaml:"git_dirty"`
+	CWDSource        string `yaml:"cwd_source"`
+	ProjectSource    string `yaml:"project_source"`
+	DiagWarningCount int    `yaml:"diag_warning_count"`
+	DiagErrorCount   int    `yaml:"diag_error_count"`
+	DiagLastCode     string `yaml:"diag_last_code"`
+	DiagLastAt       string `yaml:"diag_last_at"`
 }
 
 func readRunMetadata(path string) (*internal.Run, error) {
@@ -298,18 +313,24 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		return nil, fmt.Errorf("missing id")
 	}
 	return &internal.Run{
-		ID:         meta.ID,
-		Name:       meta.Name,
-		Project:    meta.Project,
-		Command:    meta.Command,
-		Status:     meta.Status,
-		ExitCode:   meta.ExitCode,
-		CWD:        meta.CWD,
-		StartedAt:  meta.StartedAt,
-		EndedAt:    meta.EndedAt,
-		DurationMs: meta.DurationMs,
-		GitCommit:  meta.GitCommit,
-		GitDirty:   meta.GitDirty,
+		ID:               meta.ID,
+		Name:             meta.Name,
+		Project:          meta.Project,
+		Command:          meta.Command,
+		Status:           meta.Status,
+		ExitCode:         meta.ExitCode,
+		CWD:              meta.CWD,
+		StartedAt:        meta.StartedAt,
+		EndedAt:          meta.EndedAt,
+		DurationMs:       meta.DurationMs,
+		GitCommit:        meta.GitCommit,
+		GitDirty:         meta.GitDirty,
+		CWDSource:        meta.CWDSource,
+		ProjectSource:    meta.ProjectSource,
+		DiagWarningCount: meta.DiagWarningCount,
+		DiagErrorCount:   meta.DiagErrorCount,
+		DiagLastCode:     meta.DiagLastCode,
+		DiagLastAt:       meta.DiagLastAt,
 	}, nil
 }
 
@@ -322,7 +343,7 @@ func webCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "web",
 		Short: "启动 Web Dashboard（局域网访问）",
-		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认端口 9213。",
+		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认监听 0.0.0.0:9213。",
 		Example: `  # 启动 Web Dashboard
   brun web
 

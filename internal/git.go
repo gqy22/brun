@@ -21,7 +21,7 @@ func HomeDir() string {
 	if d := os.Getenv("BRUN_HOME"); d != "" {
 		return d
 	}
-	return filepath.Join(os.Getenv("HOME"), ".bio-runner")
+	return filepath.Join(os.Getenv("HOME"), ".brun")
 }
 
 func RunsRoot() string {
@@ -49,21 +49,28 @@ func WithCLIProject(p string) ProjectOption {
 	return func(o *projectOpts) { o.cliProject = p }
 }
 
-func DetectProject(cwd string, opts ...ProjectOption) (string, string) {
+func DetectProject(cwd string, opts ...ProjectOption) (string, string, string, error) {
 	var po projectOpts
 	for _, o := range opts {
 		o(&po)
 	}
 	if po.cliProject != "" {
-		return po.cliProject, cwd
+		return po.cliProject, cwd, "explicit", nil
 	}
 	yamlPath := filepath.Join(cwd, "brun.yaml")
-	if data, err := os.ReadFile(yamlPath); err == nil {
-		if cfg, err := ParseConfig(data); err == nil && cfg.Project != "" {
-			return cfg.Project, cwd
+	data, err := os.ReadFile(yamlPath)
+	if err == nil {
+		cfg, parseErr := ParseConfig(data)
+		if parseErr != nil {
+			return "", cwd, "", fmt.Errorf("parse %s: %w", yamlPath, parseErr)
 		}
+		if cfg.Project != "" {
+			return cfg.Project, cwd, "config", nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", cwd, "", fmt.Errorf("read %s: %w", yamlPath, err)
 	}
-	return filepath.Base(cwd), cwd
+	return filepath.Base(cwd), cwd, "inferred", nil
 }
 
 type GitInfo struct {

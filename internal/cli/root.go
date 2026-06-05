@@ -54,8 +54,13 @@ func Execute(opts Options) error {
 		Use:   "brun",
 		Short: "bio-runner: 面向生物信息学的运行记录与日志管理工具",
 		Long: `brun 是一个跨项目运行记录工具。
-	通过 brun run -- <command> 包装任意命令，自动记录日志、环境、Git 信息和输出文件。`,
-		Version: opts.Version,
+通过 brun run -- <command> 包装任意命令，自动记录日志、环境、Git 信息和输出文件。
+
+默认数据目录为 ~/.brun，可通过 BRUN_HOME 覆盖。
+查询最新 run 使用显式 --latest；位置参数始终按真实 run_id 处理。`,
+		Version:       opts.Version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 	rootCmd.SetHelpTemplate(helpTemplate)
 	rootCmd.SetUsageTemplate(usageTemplate)
@@ -118,7 +123,11 @@ func Execute(opts Options) error {
 	})
 	rootCmd.PersistentFlags().BoolP("version", "v", false, "显示版本号")
 
-	return rootCmd.Execute()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprint(os.Stderr, formatCLIError(err))
+		return err
+	}
+	return nil
 }
 
 func openStore() (*internal.Store, error) {

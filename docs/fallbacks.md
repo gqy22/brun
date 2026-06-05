@@ -10,6 +10,7 @@
 - `retry`：失败后自动重试。
 - `degrade`：平台或环境不支持时返回空实现。
 - `classification-default`：无法识别时归入默认类别。
+- `resolved`：曾经存在的 fallback 或隐式行为，已经清理；保留记录用于防止回归。
 
 ## 当前清单
 
@@ -17,9 +18,9 @@
 
 - 类型：`default`
 - 位置：`internal/git.go:20`
-- 当前行为：如果未设置 `BRUN_HOME`，使用 `$HOME/.bio-runner`。
-- 影响：用户可能不知道数据写入位置；如果 `$HOME` 为空，路径也会变得不可靠。
-- 建议：保留默认值可以接受，但启动时或 `brun info` 中应明确展示实际数据目录。也可以要求关键写操作先确认 `HomeDir()` 非空。
+- 当前行为：如果未设置 `BRUN_HOME`，使用 `$HOME/.brun`。不会探测、迁移或兼容旧的 `$HOME/.bio-runner`。
+- 影响：默认路径更短、更符合工具命名；已有本地旧数据需要之后单独迁移，当前版本不会自动搬运。
+- 建议：保留新默认值。后续如需迁移旧目录，应提供显式迁移命令，而不是在启动时自动兼容多个目录。
 
 ### 2. run_id 短 ID 路径
 
@@ -31,19 +32,20 @@
 
 ### 3. Project 名推断
 
-- 类型：`infer`
+- 类型：`visible-infer`
 - 位置：`internal/git.go:48`
 - 当前行为：优先级为 `--project` > `brun.yaml project` > 当前目录名。
 - 影响：当前目录名作为项目名可能导致记录归错项目，尤其是在临时目录、软链接目录或脚本自动运行场景。
-- 建议：可以保留 `--project` 和 `brun.yaml`；是否允许目录名 fallback 应变成显式配置，例如 `--infer-project` 或初始化时写入配置。
+- 当前治理：run 记录已写入 `project_source=explicit|config|inferred`，`brun show` 和 Web API 会展示来源；推断时也会写入 info 级诊断。
+- 建议：短期保留目录名推断，但继续在 UI/CLI 中明确展示来源。
 
 ### 4. brun.yaml 解析失败后使用默认配置
 
-- 类型：`diagnosed-degrade`
+- 类型：`resolved`
 - 位置：`internal/cli/run.go`
-- 当前行为：读取到 `brun.yaml` 后，如果 `ParseConfig` 失败，会写入 `diagnostics.jsonl` 并在 run 结束摘要中提示 warning，然后继续使用默认配置。
-- 影响：用户已经能看到配置解析失败，但错误配置仍不会阻断运行，ignore/capture/project 可能不生效。
-- 建议：下一步删除该 degrade。存在 `brun.yaml` 但解析失败时应直接报错，或提供显式 `--ignore-config-errors`。
+- 当前行为：读取到 `brun.yaml` 后，如果 `ParseConfig` 失败，`brun run` 会直接报错，命令不会启动。
+- 影响：错误配置不会再被默认配置掩盖。
+- 建议：保持严格行为，不增加继续运行的兼容开关。
 
 ### 5. Git 信息采集失败被忽略
 
@@ -55,11 +57,12 @@
 
 ### 6. 命令工作目录自动推断
 
-- 类型：`infer`
+- 类型：`visible-infer`
 - 位置：`internal/cli/run.go:464`
 - 当前行为：如果首个参数是已存在脚本文件，使用脚本所在目录；否则回退当前目录。
 - 影响：行为不透明。同一个命令在脚本路径存在或不存在时 CWD 不同，可能造成输出文件位置变化。
-- 建议：后续优先使用显式 `--cwd`。自动推断可以删除，或只在 `brun run-script <path>` 这类专门命令中启用。
+- 当前治理：run 记录已写入 `cwd_source=explicit|inferred`，`brun show` 和 Web API 会展示来源；推断时也会写入 info 级诊断。
+- 建议：短期保留自动推断，但帮助信息和详情页必须继续提示来源。
 
 ### 7. 脚本快照自动查找失败后跳过
 
@@ -71,11 +74,11 @@
 
 ### 8. 保存 command/env/script 失败被忽略
 
-- 类型：`diagnosed-degrade`
+- 类型：`partial-resolved`
 - 位置：`internal/cli/run.go`
-- 当前行为：`SaveCommandFile`、`SaveEnvFile`、`SaveInputScript` 返回错误时写入 warning，并在 run 结束摘要中提示；run 仍继续执行。
-- 影响：关键审计文件可能缺失，但用户已经能看到诊断提示。
-- 建议：继续收紧。`command.sh` 和 `env.txt` 保存失败应阻断运行；脚本快照失败可以保持 warning。
+- 当前行为：`command.sh` 或 `env.txt` 写入失败时直接报错，命令不会启动；脚本快照失败仍写入 warning 并继续运行。
+- 影响：关键审计文件不再缺失后继续执行；脚本快照仍是辅助审计，允许降级。
+- 建议：保留当前分层：command/env 强约束，script snapshot 诊断化。
 
 ### 9. 文件系统 before/after 快照失败被忽略
 
@@ -98,8 +101,8 @@
 - 类型：`diagnosed-degrade`
 - 位置：`internal/cli/run.go`
 - 当前行为：`store.CreateArtifact` 返回错误时写入 warning，并在 run 结束摘要中提示；run 状态仍按命令退出码更新。
-- 影响：用户能知道 artifact 入库失败，但 list/web 仍可能看不到这些输出文件。
-- 建议：如果 artifact 是核心能力，后续应在 run metadata 中记录 artifact 写入失败，或把 run 标为 `success_with_warnings`。
+- 影响：用户能通过 `brun list` 的 `DIAG`、`brun show`、`brun diag` 和 Web 详情知道 artifact 入库失败；诊断摘要已入库，但 run 状态仍是 `success` 或 `failed`。
+- 建议：后续如需要更强语义，可增加展示层状态 `success_with_warnings`，但不要覆盖真实命令退出状态。
 
 ### 12. tag/note 写入失败被忽略
 
@@ -122,8 +125,9 @@
 - 类型：`diagnosed-degrade`
 - 位置：`internal/cli/run.go`
 - 当前行为：`os.WriteFile(metadata.yaml)` 返回错误时写入 warning，并在 run 结束摘要中提示。
-- 影响：run 目录中的离线元数据可能缺失，但 SQLite run 记录仍会更新。
-- 建议：继续保留 SQLite 更新优先级；metadata 写入失败应在 list/web 中可见。
+- 影响：run 目录中的离线元数据可能缺失，但 SQLite run 记录仍会更新；`repair-index` 无法从缺失的 metadata 重建这条 run。
+- 当前治理：metadata 写入失败会进入 run 级诊断摘要，`brun list` 和 Web 列表不需要扫描 `diagnostics.jsonl` 也能看到警告。
+- 建议：继续保留 SQLite 更新优先级。
 
 ### 15. 失败摘要读取 stderr 失败被忽略
 
@@ -143,11 +147,11 @@
 
 ### 17. 后台 detached run 预生成 runID
 
-- 类型：`default`
+- 类型：`resolved`
 - 位置：`internal/cli/run.go:376`
-- 当前行为：后台父进程生成一个 runID 用于 stdout/stderr 路径；子进程真正执行时会再次生成自己的 runID。
-- 影响：用户看到的 `[nohup] RunID` 可能不是数据库中的实际 run id，这是比 fallback 更严重的语义不一致。
-- 建议：优先修复。父子进程应共享同一个 run id，或父进程不要打印 run id。
+- 当前行为：后台父进程预生成 runID，并通过隐藏 `--run-id` 传给子进程；父进程打印的 runID、run 目录和数据库记录一致。
+- 影响：原先的语义不一致已经修复。
+- 建议：保留回归测试；后续不要再引入父子进程各自生成 runID 的路径。
 
 ### 18. Web addr 和 port 默认值
 
@@ -221,13 +225,13 @@
 - 影响：用户不知道是没有快照，还是快照被大小/二进制规则过滤。
 - 建议：返回具体原因，例如 `snapshot too large` 或 `snapshot is binary`。
 
-### 27. 时间过滤解析失败原样返回
+### 27. 时间过滤严格解析
 
-- 类型：`silent-ignore`
+- 类型：`resolved`
 - 位置：`internal/cli/query.go:367`
-- 当前行为：`parseTimeFilter` 对未知格式原样返回，让 SQL 查询自然失败或查不到。
-- 影响：用户输入错误时间时可能得到空列表，而不是明确错误。
-- 建议：改为返回 `(string, error)`，非法时间格式直接报错。
+- 当前行为：`parseTimeFilter` 只接受 `YYYY-MM-DD`、RFC3339、`today`、`Nh`、`Nd`、`Nw`。非法格式会直接报错。
+- 影响：用户和智能体不会再把错误时间条件误解为空结果。
+- 建议：保持严格解析。
 
 ### 28. hostname 获取失败返回空
 
@@ -299,22 +303,56 @@
 - 位置：`internal/store.go`
 - 当前行为：SQLite 默认使用 `BRUN_SQLITE_SYNC=off`，把数据库定位为快速索引层；run 目录中的 `metadata.yaml`、日志和诊断文件是主审计载体。用户可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full` 提升写入一致性。
 - 影响：极端情况下，例如机器断电或文件系统崩溃，最近一次 SQLite 写入可能丢失或损坏，但 run 目录仍保留审计文件。
-- 建议：保留该默认值以保证短任务体验，同时提供 `brun repair-index --write` 从 run 目录重建缺失索引。
+- 建议：保留该默认值以保证短任务体验。当前已提供 `brun repair-index --write` 从 run 目录重建缺失 run 索引；后续如需恢复 artifacts/tags/notes，需要扩展 metadata 或增加独立审计文件。
+
+### 37. latest 伪 run id
+
+- 类型：`resolved`
+- 位置：`internal/cli/query.go`, `internal/cli/manage.go`, `cmd/query.go`
+- 当前行为：`latest` 不再作为位置参数伪装成 run id；查询和管理命令统一使用显式 `--latest`。例如 `brun show --latest`、`brun logs --latest`、`brun tag --latest TAG...`。
+- 影响：旧的 `brun show latest` 会按普通 run id 查询并失败，不再触发隐藏选择逻辑。CLI 语义更清楚，也避免把特殊词混进 run id 空间。
+- 建议：保留这种显式选择器模式。新增命令也应使用短命令名加显式 flag，例如 `brun diag --latest`，不要新增长命令或兼容别名。
+
+### 38. 查询输出只能解析人类文本
+
+- 类型：`resolved`
+- 位置：`internal/cli/query.go`
+- 当前行为：`brun list`、`brun show`、`brun outputs` 已支持 `--json`；`brun diag --json` 继续提供完整诊断事件。
+- 影响：智能体和脚本不需要解析表格或彩色文本，可以直接消费 snake_case JSON 字段。
+- 建议：新增查询类命令时默认同时提供人类输出和 `--json`。
+
+### 39. 常见 CLI 错误缺少稳定 code/hint
+
+- 类型：`partial-resolved`
+- 位置：`internal/cli/errors.go`, `internal/cli/root.go`
+- 当前行为：常见可恢复错误会输出 `Error`、`Code` 和 `Hint`，目前覆盖时间过滤、run 选择器、run 查找、配置解析、命令不存在、run 目录创建、command/env 审计文件写入失败。
+- 影响：智能体可以根据稳定错误码决定修参数、查 run 列表、修配置、检查权限或终止流程。
+- 建议：继续把数据库损坏、索引缺失、日志文件缺失、Web 端口占用等错误迁入同一格式。
 
 ## 建议清理顺序
 
-1. 先修复会造成用户看到错误标识的 fallback：后台 detached run 预生成 RunID。
-2. 再清理已诊断化但仍可能造成数据缺失的 degrade：保存 command/env/script、tag/note、artifact、metadata 的写入失败。
-3. 再清理会造成行为漂移的 fallback：CWD 自动推断、project 目录名推断、Web 端口自动递增。
-4. 然后清理会掩盖配置错误的 fallback：`brun.yaml` 解析失败、时间过滤解析失败。
-5. 最后处理合理但需要显式化的 fallback：非 Linux 资源采样、进程诊断采样状态、Git 信息采集、Conda 信息采集、HomeDir 默认值。
+1. 继续处理会造成行为漂移的 fallback：Web 端口自动递增、Web 默认监听地址。
+2. 把剩余高频失败迁入结构化错误：数据库损坏/缺失、日志文件缺失、Web 端口占用。
+3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、进程诊断采样状态、Git 信息采集、Conda 信息采集、HomeDir 默认值。
+4. 最后评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
+
+## 下一轮优化方向
+
+当前已经不需要继续做目录架构拆分。下一轮更值得做的是“Web 启动语义”和“剩余状态显式化”：
+
+1. Web 启动语义收紧：显式 `--port` 被占用时直接失败；如保留端口递增，只允许默认端口自动寻找。
+2. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
+3. 剩余错误结构化：数据库损坏/缺失提示 `repair-index`，日志文件缺失提示 run 状态和 run_dir。
+4. 资源能力显式化：非 Linux 或采样失败时返回 `resource_supported=false` / `activity_sampled=false`，不要把“不支持”显示成 0。
+5. Git/Conda/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
 
 ## 保留候选
 
 以下 fallback 当前看起来合理，但仍建议显式记录：
 
-- `BRUN_HOME` 未设置时使用 `$HOME/.bio-runner`。
+- `BRUN_HOME` 未设置时使用 `$HOME/.brun`。
 - SQLite busy 自动重试。
 - `brun list` 在数据库不存在时创建空库。
 - note 不存在时返回空字符串。
 - `--allow-exit` 显式覆盖状态。
+- `--latest` 显式选择最新 run。

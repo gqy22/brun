@@ -74,19 +74,17 @@ web/
 
 当前架构已经够用一段时间。下一轮优先级不应继续做结构拆分，而应转向 `docs/fallbacks.md` 中的行为清理，先减少会造成数据丢失、用户无感或行为漂移的 fallback。
 
-运行诊断已经开始落地：`brun run` 会把推断行为和关键写入失败记录到 run 目录下的 `diagnostics.jsonl`，并在前台运行结束时输出 warning 摘要。下一步重点不是继续拆包，而是把这些诊断接入 list/web，使用户不需要进入 run 目录也能看到“成功但有提示”的状态。
+运行诊断已经落地：`brun run` 会把推断行为和关键写入失败记录到 run 目录下的 `diagnostics.jsonl`，并在前台运行结束时输出 warning 摘要。诊断摘要已经写入 SQLite，`brun list`、`brun show` 和 Web 列表可以直接展示 warning/error 状态；`brun diag` 用于查看完整诊断事件。
 
 SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.o`、`stderr.er`、`metadata.yaml` 和 `diagnostics.jsonl` 是主审计载体。默认 `BRUN_SQLITE_SYNC=off` 用于避免短任务被 SQLite 同步拖慢；需要更强写入一致性时可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full`。如果索引缺失或损坏，使用 `brun repair-index --write` 从 run 目录重建缺失的 run 记录。
 
 建议优先级：
 
-1. 修复后台 detached run 的 RunID 不一致问题。
-2. 给 run 记录增加诊断摘要字段，例如 warning 数、最后诊断时间和关键 code。
-3. 在 `brun list` 和 Web run detail 中展示诊断状态。
-4. 提供索引修复能力，从 run 目录重建 SQLite 中缺失的 run 记录。
-5. 逐步把关键审计文件、tag/note/artifact/resource/metadata 的写入失败从“仅提示”收紧为明确状态。
-6. 让 `brun.yaml` 和时间过滤解析错误显式报错。
-7. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
+1. 收紧 Web 启动语义：显式端口占用时不要静默漂移，默认监听地址要在 help 和启动输出中讲清楚。
+2. 资源能力显式化：非 Linux 或采样失败时返回能力/采样状态，而不是让 UI 把“不支持”看成 0。
+3. Git/Conda/hostname/username 采集状态显式化。
+4. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
+5. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
 
 ## 任务调度与依赖运行
 

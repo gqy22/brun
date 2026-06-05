@@ -15,7 +15,11 @@ func init() {
 }
 
 func InitLogger() error {
-	logPath := filepath.Join(HomeDir(), "brun.log")
+	home := HomeDir()
+	if err := os.MkdirAll(home, 0755); err != nil {
+		return err
+	}
+	logPath := filepath.Join(home, "brun.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err

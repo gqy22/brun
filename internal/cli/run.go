@@ -74,10 +74,13 @@ func runCmd() *cobra.Command {
 		Long:  "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
 		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
   brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
-  # 等效于: nohup bwa mem ... > ~/.local/share/brun/runs/<id>/stdout.o 2> ~/.local/share/brun/runs/<id>/stderr.er &
+  # 日志写入: ~/.brun/runs/YYYY/MM/DD/<run_id>/stdout.o 和 stderr.er
 
   # 带项目名和标签
   brun run -p genome-align -t hg38,pep-align -- bwa mem ref.fa reads.fq > aligned.sam
+
+  # 智能体推荐：前台运行，命令退出后再读取 run 记录和诊断
+  brun run -f -p genome-align -n align-S1 -- bwa mem ref.fa reads.fq
 
   # Snakemake 流程 (前台运行，方便调试)
   brun run -f -- snakemake -j 8
@@ -106,10 +109,10 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVarP(&project, "project", "p", "", "项目名")
 	c.Flags().StringVar(&note, "note", "", "备注")
 	c.Flags().StringArrayVarP(&tags, "tag", "t", []string{}, "标签 (支持逗号分隔: -t align,hg38)")
-	c.Flags().BoolVar(&noFsDiff, "no-fs-diff", false, "禁用文件系统 diff")
+	c.Flags().BoolVar(&noFsDiff, "no-fs-diff", false, "禁用文件系统 diff 和自动输出检测")
 	c.Flags().StringVar(&allowExit, "allow-exit", "", "允许的非零退出码 (逗号分隔，如: 1,2,127)")
-	c.Flags().IntVar(&timeout, "timeout", 0, "超时(秒)")
-	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录")
+	c.Flags().IntVar(&timeout, "timeout", 0, "超时秒数；0 表示不限制")
+	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录；不传时从脚本路径或当前目录推断")
 	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
 	c.Flags().StringVar(&runIDFlag, "run-id", "", "内部使用: 指定 run ID")
 	c.Flags().MarkHidden("run-id")
@@ -132,10 +135,10 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 1. 确定工作目录
 	cwd := cwdFlag
-	cwdInferred := false
+	cwdSource := "explicit"
 	if cwd == "" {
 		cwd = detectCWD(args[0])
-		cwdInferred = true
+		cwdSource = "inferred"
 	}
 
 	// 2. 生成 run_id + 创建 run_dir
@@ -145,16 +148,19 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 	runDir := internal.RunDir(runID)
 	if err := internal.EnsureDir(runDir); err != nil {
-		return fmt.Errorf("创建 run 目录失败: %w", err)
+		return cliError("run_dir_create_failed", "创建 run 目录失败: "+err.Error(), "检查 BRUN_HOME、磁盘空间和目录权限", err)
 	}
 	diagnostics := internal.NewDiagnosticWriter(runDir)
-	if cwdInferred {
+	if cwdSource == "inferred" {
 		diagnostics.Info("cwd_inferred", "已推断运行目录", cwd)
 	}
 
 	// 3. 识别 project + 读 brun.yaml
-	projName, projRoot := internal.DetectProject(cwd, internal.WithCLIProject(project))
-	if project == "" {
+	projName, projRoot, projectSource, err := internal.DetectProject(cwd, internal.WithCLIProject(project))
+	if err != nil {
+		return cliError("config_parse_failed", "项目配置错误: "+err.Error(), "修复 brun.yaml 后重试；不会使用默认配置继续运行", err)
+	}
+	if projectSource == "inferred" {
 		diagnostics.Info("project_inferred", "已推断项目名", projName)
 	}
 	cfgPath := filepath.Join(projRoot, "brun.yaml")
@@ -163,7 +169,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 		if parsed, parseErr := internal.ParseConfig(data); parseErr == nil {
 			cfg = parsed
 		} else {
-			diagnostics.Warning("config_parse_failed", "brun.yaml 解析失败，已使用默认配置", parseErr.Error())
+			return cliError("config_parse_failed", "brun.yaml 解析失败: "+parseErr.Error(), "修复 brun.yaml 后重试；不会使用默认配置继续运行", parseErr)
 		}
 	}
 	if project != "" {
@@ -178,7 +184,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 5.5 预检查: 命令可执行文件是否存在
 	if exePath, err := exec.LookPath(args[0]); err != nil {
-		return fmt.Errorf("命令 '%s' 未找到: %w\n  提示: 使用 'brun run -- <command>' 确保命令在 PATH 中或使用完整路径", args[0], err)
+		return cliError("command_not_found", fmt.Sprintf("命令 %q 未找到: %v", args[0], err), "确认命令在 PATH 中，或使用完整路径；命令格式为 brun run -- <command>", err)
 	} else {
 		args[0] = exePath // exec.LookPath 返回规范化路径
 	}
@@ -186,9 +192,11 @@ func executeRun(args []string, name, project, note string, tags []string,
 	// 6. 保存 command.sh + env.txt + 输入脚本快照
 	if err := cmd.SaveCommandFile(runDir, commandStr); err != nil {
 		diagnostics.Warning("command_file_write_failed", "command.sh 写入失败", err.Error())
+		return cliError("command_file_write_failed", "command.sh 写入失败，命令未启动: "+err.Error(), "检查 run 目录权限和磁盘空间", err)
 	}
 	if err := cmd.SaveEnvFile(runDir); err != nil {
 		diagnostics.Warning("env_file_write_failed", "env.txt 写入失败", err.Error())
+		return cliError("env_file_write_failed", "env.txt 写入失败，命令未启动: "+err.Error(), "检查 run 目录权限和磁盘空间", err)
 	}
 	// 尝试从参数中找到实际的脚本文件（跳过解释器如 bash/python）
 	if scriptPath := findScriptArg(args); scriptPath != "" {
@@ -214,24 +222,30 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	runRecord := &internal.Run{
-		ID:        runID,
-		Name:      name,
-		Project:   projName,
-		CWD:       cwd,
-		Command:   commandStr,
-		Status:    "running",
-		RunDir:    runDir,
-		StartedAt: now,
-		Hostname:  hostname(),
-		Username:  username(),
-		GitRepo:   gitInfo.Repo,
-		GitBranch: gitInfo.Branch,
-		GitCommit: gitInfo.Commit,
-		GitDirty:  gitInfo.Dirty,
+		ID:            runID,
+		Name:          name,
+		Project:       projName,
+		CWD:           cwd,
+		Command:       commandStr,
+		Status:        "running",
+		RunDir:        runDir,
+		StartedAt:     now,
+		Hostname:      hostname(),
+		Username:      username(),
+		GitRepo:       gitInfo.Repo,
+		GitBranch:     gitInfo.Branch,
+		GitCommit:     gitInfo.Commit,
+		GitDirty:      gitInfo.Dirty,
+		CWDSource:     cwdSource,
+		ProjectSource: projectSource,
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
 	}
+	syncRunDiagnostics(store, runID, runDir)
+	diagnostics.SetAfterRecord(func() {
+		syncRunDiagnostics(store, runID, runDir)
+	})
 
 	// 9. before 快照（如果不禁用 fs-diff）
 	var beforeSnapshot map[string]internal.FileInfo
@@ -355,6 +369,12 @@ func executeRun(args []string, name, project, note string, tags []string,
 	runRecord.ExitCode = result.ExitCode
 	runRecord.EndedAt = result.EndedAt
 	runRecord.DurationMs = result.DurationMs
+	if summary, err := internal.ReadDiagnosticSummary(runDir); err == nil {
+		runRecord.DiagWarningCount = summary.WarningCount
+		runRecord.DiagErrorCount = summary.ErrorCount
+		runRecord.DiagLastCode = summary.LastCode
+		runRecord.DiagLastAt = summary.LastAt
+	}
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
 	if err := os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {
 		diagnostics.Warning("metadata_write_failed", "metadata.yaml 写入失败", err.Error())
@@ -408,6 +428,20 @@ func printDiagnosticSummary(runDir string) {
 	fmt.Printf("诊断文件: %s\n", filepath.Join(runDir, internal.DiagnosticsFileName))
 }
 
+func syncRunDiagnostics(store *internal.Store, runID, runDir string) {
+	if store == nil || runID == "" || runDir == "" {
+		return
+	}
+	summary, err := internal.ReadDiagnosticSummary(runDir)
+	if err != nil {
+		internal.Log().Warn("diagnostic_summary_read_failed", "run_id", runID, "error", err.Error())
+		return
+	}
+	if err := store.UpdateRunDiagnostics(runID, summary); err != nil {
+		internal.Log().Warn("diagnostic_summary_update_failed", "run_id", runID, "error", err.Error())
+	}
+}
+
 // detachRun 将命令以后台 nohup 方式执行，等效于 nohup cmd > out.o 2> out.er &
 func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
 	noFsDiff bool, allowExit string, timeout int, cwdFlag string) error {
@@ -451,7 +485,7 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 		return fmt.Errorf("获取可执行路径失败: %w", err)
 	}
 
-	// 输出目录: ~/.local/share/brun/runs/<run_id>/
+	// 输出目录: ~/.brun/runs/YYYY/MM/DD/<run_id>/
 	runDir := internal.RunDir(runID)
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return fmt.Errorf("创建 run 目录失败: %w", err)
