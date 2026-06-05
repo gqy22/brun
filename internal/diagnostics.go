@@ -114,6 +114,7 @@ func DiagnosticSummaryFromRun(r *Run) DiagnosticSummary {
 		return DiagnosticSummary{}
 	}
 	return DiagnosticSummary{
+		InfoCount:    r.DiagInfoCount,
 		WarningCount: r.DiagWarningCount,
 		ErrorCount:   r.DiagErrorCount,
 		LastCode:     r.DiagLastCode,

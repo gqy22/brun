@@ -89,18 +89,31 @@ func TestBuildRerunCommand_WithNewCWD(t *testing.T) {
 
 func TestBuildMetadataYAML(t *testing.T) {
 	run := &internal.Run{
-		ID:        "20260513-153012-a8f3c2",
-		Name:      "test",
-		Project:   "proj",
-		Command:   "echo hi",
-		Status:    "success",
-		ExitCode:  0,
-		RunDir:    "/tmp/run",
-		GitCommit: "abc1234",
+		ID:               "20260513-153012-a8f3c2",
+		Name:             "test",
+		Project:          "proj",
+		Command:          "echo hi",
+		Status:           "success",
+		ExitCode:         0,
+		RunDir:           "/tmp/run",
+		GitCommit:        "abc1234",
+		DiagInfoCount:    1,
+		DiagWarningCount: 2,
+		DiagErrorCount:   3,
 	}
 
 	yaml := BuildMetadataYAML(run)
-	checks := []string{"20260513-153012-a8f3c2", "test", "proj", "echo hi", "success", "abc1234"}
+	checks := []string{
+		"20260513-153012-a8f3c2",
+		"test",
+		"proj",
+		"echo hi",
+		"success",
+		"abc1234",
+		"diag_info_count: 1",
+		"diag_warning_count: 2",
+		"diag_error_count: 3",
+	}
 	for _, c := range checks {
 		if !strings.Contains(yaml, c) {
 			t.Errorf("metadata missing %q", c)

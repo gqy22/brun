@@ -370,6 +370,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	runRecord.EndedAt = result.EndedAt
 	runRecord.DurationMs = result.DurationMs
 	if summary, err := internal.ReadDiagnosticSummary(runDir); err == nil {
+		runRecord.DiagInfoCount = summary.InfoCount
 		runRecord.DiagWarningCount = summary.WarningCount
 		runRecord.DiagErrorCount = summary.ErrorCount
 		runRecord.DiagLastCode = summary.LastCode

@@ -294,6 +294,7 @@ type runMetadata struct {
 	GitDirty         bool   `yaml:"git_dirty"`
 	CWDSource        string `yaml:"cwd_source"`
 	ProjectSource    string `yaml:"project_source"`
+	DiagInfoCount    int    `yaml:"diag_info_count"`
 	DiagWarningCount int    `yaml:"diag_warning_count"`
 	DiagErrorCount   int    `yaml:"diag_error_count"`
 	DiagLastCode     string `yaml:"diag_last_code"`
@@ -327,6 +328,7 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		GitDirty:         meta.GitDirty,
 		CWDSource:        meta.CWDSource,
 		ProjectSource:    meta.ProjectSource,
+		DiagInfoCount:    meta.DiagInfoCount,
 		DiagWarningCount: meta.DiagWarningCount,
 		DiagErrorCount:   meta.DiagErrorCount,
 		DiagLastCode:     meta.DiagLastCode,

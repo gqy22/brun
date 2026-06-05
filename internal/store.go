@@ -12,7 +12,7 @@ import (
 )
 
 const maxRetries = 5
-const schemaVersion = 2
+const schemaVersion = 3
 const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
@@ -41,6 +41,7 @@ type Run struct {
 	GitDirty         bool
 	PeakRSSKB        int64
 	CPUTimeMs        int64
+	DiagInfoCount    int
 	DiagWarningCount int
 	DiagErrorCount   int
 	DiagLastCode     string
@@ -146,6 +147,7 @@ func (s *Store) migrate() error {
 			username TEXT, git_repo TEXT, git_branch TEXT,
 			git_commit TEXT, git_dirty INTEGER DEFAULT 0,
 			peak_rss_kb INTEGER DEFAULT 0, cpu_time_ms INTEGER DEFAULT 0,
+			diag_info_count INTEGER DEFAULT 0,
 			diag_warning_count INTEGER DEFAULT 0,
 			diag_error_count INTEGER DEFAULT 0,
 			diag_last_code TEXT,
@@ -183,6 +185,7 @@ func (s *Store) migrate() error {
 		);`,
 		`ALTER TABLE runs ADD COLUMN peak_rss_kb INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN cpu_time_ms INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN diag_info_count INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN diag_warning_count INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN diag_error_count INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN diag_last_code TEXT`,
@@ -306,12 +309,12 @@ func searchString(s, sub string) bool {
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
-		r.PeakRSSKB, r.CPUTimeMs, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
+		r.PeakRSSKB, r.CPUTimeMs, r.DiagInfoCount, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
 		now, now,
 	)
 }
@@ -319,11 +322,11 @@ func (s *Store) CreateRun(r *Run) error {
 func (s *Store) GetRun(id string) (*Run, error) {
 	r := &Run{}
 	err := s.db.QueryRow(
-		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE id=?`, id,
+		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE id=?`, id,
 	).Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
 		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty, &r.PeakRSSKB, &r.CPUTimeMs,
-		&r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
+		&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
@@ -348,13 +351,13 @@ func (s *Store) UpdateRunResources(id string, peakRSSKB, cpuTimeMs int64) error 
 func (s *Store) UpdateRunDiagnostics(id string, summary DiagnosticSummary) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`UPDATE runs SET diag_warning_count=?, diag_error_count=?, diag_last_code=?, diag_last_at=?, updated_at=? WHERE id=?`,
-		summary.WarningCount, summary.ErrorCount, summary.LastCode, summary.LastAt, now, id,
+		`UPDATE runs SET diag_info_count=?, diag_warning_count=?, diag_error_count=?, diag_last_code=?, diag_last_at=?, updated_at=? WHERE id=?`,
+		summary.InfoCount, summary.WarningCount, summary.ErrorCount, summary.LastCode, summary.LastAt, now, id,
 	)
 }
 
 func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string) ([]*Run, error) {
-	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
+	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
 	args := []any{}
 
 	if project != "" {
@@ -399,7 +402,7 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 		err := rows.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 			&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
 			&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty, &r.PeakRSSKB, &r.CPUTimeMs,
-			&r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
+			&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
 		if err != nil {
 			return nil, err
 		}

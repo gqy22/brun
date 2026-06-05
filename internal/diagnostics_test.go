@@ -54,3 +54,19 @@ func TestSummarizeDiagnostics(t *testing.T) {
 		t.Fatalf("last event summary = %+v", summary)
 	}
 }
+
+func TestDiagnosticSummaryFromRunIncludesInfoCount(t *testing.T) {
+	summary := DiagnosticSummaryFromRun(&Run{
+		DiagInfoCount:    1,
+		DiagWarningCount: 2,
+		DiagErrorCount:   3,
+		DiagLastCode:     "script_snapshot_missing",
+		DiagLastAt:       "2026-06-05T01:02:00Z",
+	})
+	if summary.InfoCount != 1 || summary.WarningCount != 2 || summary.ErrorCount != 3 {
+		t.Fatalf("summary counts = %+v, want 1/2/3", summary)
+	}
+	if summary.LastCode != "script_snapshot_missing" || summary.LastAt != "2026-06-05T01:02:00Z" {
+		t.Fatalf("last event summary = %+v", summary)
+	}
+}

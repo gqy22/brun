@@ -276,6 +276,9 @@ func BuildMetadataYAML(run *internal.Run) string {
 	if run.GitDirty {
 		b.WriteString("git_dirty: true\n")
 	}
+	if run.DiagInfoCount > 0 {
+		fmt.Fprintf(&b, "diag_info_count: %d\n", run.DiagInfoCount)
+	}
 	if run.DiagWarningCount > 0 {
 		fmt.Fprintf(&b, "diag_warning_count: %d\n", run.DiagWarningCount)
 	}

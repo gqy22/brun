@@ -147,6 +147,7 @@ func TestStore_UpdateRunDiagnostics(t *testing.T) {
 	}
 
 	err := s.UpdateRunDiagnostics("diag-001", DiagnosticSummary{
+		InfoCount:    3,
 		WarningCount: 2,
 		ErrorCount:   1,
 		LastCode:     "metadata_write_failed",
@@ -160,7 +161,7 @@ func TestStore_UpdateRunDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.DiagWarningCount != 2 || got.DiagErrorCount != 1 || got.DiagLastCode != "metadata_write_failed" {
+	if got.DiagInfoCount != 3 || got.DiagWarningCount != 2 || got.DiagErrorCount != 1 || got.DiagLastCode != "metadata_write_failed" {
 		t.Fatalf("diagnostics = %+v", got)
 	}
 }
