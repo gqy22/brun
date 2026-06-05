@@ -179,11 +179,11 @@
 
 ### 21. 非 Linux 资源采样空实现
 
-- 类型：`degrade`
-- 位置：`cmd/resource_other.go:1`
-- 当前行为：非 Linux 平台资源采样返回 0，进程列表返回 nil。
-- 影响：跨平台可运行，但 Web/API 中资源信息可能看起来像真实的 0。
-- 建议：引入 capability 标记，例如 `resource_supported=false`，避免把“不支持”显示成“0”。
+- 类型：`resolved`
+- 位置：`cmd/resource_other.go`, `cmd/run.go`, `internal/store.go`
+- 当前行为：资源采样结果会同时写入 `resource_supported` 和 `resource_status=ok|unavailable|unsupported`。Linux 返回 `resource_supported=true`；非 Linux 返回 `resource_supported=false` 和 `resource_status=unsupported`。
+- 影响：Web/API 和智能体可以区分“不支持采样”“支持但未采到数据”和“正常采到资源数据”，不会把不支持误判成真实 0。
+- 建议：保持能力字段。后续如需更细，可以增加采样失败原因。
 
 ### 22. Artifact 类型默认 output
 
@@ -333,7 +333,7 @@
 
 1. 继续处理会造成行为漂移的 fallback：Web 默认监听地址是否继续保留局域网默认，或增加更明确的安全提示。
 2. 把剩余高频失败迁入结构化错误：数据库损坏/缺失、日志文件不可读。
-3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、Git 信息采集、hostname/username 采集、HomeDir 默认值。
+3. 再处理合理但需要显式化的 fallback：Git 信息采集、hostname/username 采集、HomeDir 默认值。
 4. 最后评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
 
 ## 下一轮优化方向
@@ -342,8 +342,7 @@
 
 1. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
 2. 剩余错误结构化：数据库损坏/缺失提示 `repair`，日志不可读提示 run 状态和 run_dir。
-3. 资源能力显式化：非 Linux 时返回 `resource_supported=false`，不要把“不支持”显示成 0。
-4. Git/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
+3. Git/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
 
 ## 保留候选
 

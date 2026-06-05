@@ -15,13 +15,15 @@ import (
 const second = time.Second
 
 type RunResult struct {
-	ExitCode   int
-	Status     string
-	DurationMs int64
-	StartedAt  string
-	EndedAt    string
-	PeakRSSKB  int64
-	CPUTimeMs  int64
+	ExitCode          int
+	Status            string
+	DurationMs        int64
+	StartedAt         string
+	EndedAt           string
+	PeakRSSKB         int64
+	CPUTimeMs         int64
+	ResourceSupported bool
+	ResourceStatus    string
 }
 
 type RunRecord struct {
@@ -170,11 +172,13 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	err := cmd.Start()
 	if err != nil {
 		return RunResult{
-			ExitCode:   1,
-			Status:     "failed",
-			DurationMs: time.Since(start).Milliseconds(),
-			StartedAt:  start.UTC().Format(time.RFC3339),
-			EndedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExitCode:          1,
+			Status:            "failed",
+			DurationMs:        time.Since(start).Milliseconds(),
+			StartedAt:         start.UTC().Format(time.RFC3339),
+			EndedAt:           time.Now().UTC().Format(time.RFC3339),
+			ResourceSupported: ResourceSupported(),
+			ResourceStatus:    resourceStatus(ResourceUsage{}),
 		}
 	}
 	if timeout > 0 {
@@ -239,12 +243,24 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	usage := sampler.Stop()
 
 	return RunResult{
-		ExitCode:   exitCode,
-		Status:     status,
-		DurationMs: duration.Milliseconds(),
-		StartedAt:  start.UTC().Format(time.RFC3339),
-		EndedAt:    time.Now().UTC().Format(time.RFC3339),
-		PeakRSSKB:  usage.PeakRSSKB,
-		CPUTimeMs:  usage.CPUTimeMs,
+		ExitCode:          exitCode,
+		Status:            status,
+		DurationMs:        duration.Milliseconds(),
+		StartedAt:         start.UTC().Format(time.RFC3339),
+		EndedAt:           time.Now().UTC().Format(time.RFC3339),
+		PeakRSSKB:         usage.PeakRSSKB,
+		CPUTimeMs:         usage.CPUTimeMs,
+		ResourceSupported: ResourceSupported(),
+		ResourceStatus:    resourceStatus(usage),
 	}
+}
+
+func resourceStatus(usage ResourceUsage) string {
+	if !ResourceSupported() {
+		return "unsupported"
+	}
+	if usage.PeakRSSKB > 0 || usage.CPUTimeMs > 0 {
+		return "ok"
+	}
+	return "unavailable"
 }

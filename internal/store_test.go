@@ -28,22 +28,26 @@ func TestStore_CreateRun(t *testing.T) {
 	defer s.Close()
 
 	run := &Run{
-		ID:            "20260513-153012-a8f3c2",
-		Name:          "test-run",
-		Project:       "test-project",
-		CWD:           "/home/user/project",
-		Command:       "python script.py",
-		Status:        "running",
-		StartedAt:     time.Now().UTC().Format(time.RFC3339),
-		RunDir:        "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
-		Hostname:      "devbox",
-		Username:      "user",
-		CondaStatus:   "ok",
-		CondaEnv:      "rnaseq",
-		CondaPrefix:   "/opt/conda/envs/rnaseq",
-		PythonVersion: "Python 3.11.8",
-		CWDSource:     "explicit",
-		ProjectSource: "config",
+		ID:                "20260513-153012-a8f3c2",
+		Name:              "test-run",
+		Project:           "test-project",
+		CWD:               "/home/user/project",
+		Command:           "python script.py",
+		Status:            "running",
+		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		RunDir:            "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
+		Hostname:          "devbox",
+		Username:          "user",
+		CondaStatus:       "ok",
+		CondaEnv:          "rnaseq",
+		CondaPrefix:       "/opt/conda/envs/rnaseq",
+		PythonVersion:     "Python 3.11.8",
+		ResourceSupported: true,
+		ResourceStatus:    "ok",
+		PeakRSSKB:         1024,
+		CPUTimeMs:         25,
+		CWDSource:         "explicit",
+		ProjectSource:     "config",
 	}
 
 	err := s.CreateRun(run)
@@ -66,6 +70,9 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if got.CondaStatus != "ok" || got.CondaEnv != "rnaseq" || got.PythonVersion != "Python 3.11.8" {
 		t.Errorf("conda = %+v, want ok/rnaseq/Python 3.11.8", got)
+	}
+	if !got.ResourceSupported || got.ResourceStatus != "ok" || got.PeakRSSKB != 1024 || got.CPUTimeMs != 25 {
+		t.Errorf("resources = %+v, want supported ok 1024/25", got)
 	}
 }
 

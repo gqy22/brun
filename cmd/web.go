@@ -204,6 +204,8 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"conda_env":          run.CondaEnv,
 		"conda_prefix":       run.CondaPrefix,
 		"python_version":     run.PythonVersion,
+		"resource_supported": run.ResourceSupported,
+		"resource_status":    run.ResourceStatus,
 		"peak_rss_kb":        run.PeakRSSKB,
 		"cpu_time_ms":        run.CPUTimeMs,
 		"run_dir":            run.RunDir,
@@ -470,7 +472,7 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 		sigCh := make(chan os.Signal, 1)
 		result := ExecuteCommandWithSignal(cmdParts, run.CWD, stdoutPath, stderrPath, 0, sigCh)
 		s.store.UpdateRunStatus(newID, result.Status, result.ExitCode, result.EndedAt, result.DurationMs)
-		s.store.UpdateRunResources(newID, result.PeakRSSKB, result.CPUTimeMs)
+		s.store.UpdateRunResources(newID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus)
 	}()
 
 	jsonResponse(w, map[string]any{"ok": true, "run_id": newID})
@@ -517,7 +519,7 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 
 	pss, cst := readProcStats(pid)
 	if pss > 0 || cst > 0 {
-		s.store.UpdateRunResources(id, pss, cst)
+		s.store.UpdateRunResources(id, pss, cst, ResourceSupported(), "ok")
 	}
 
 	if err := killProcessGroup(pid, syscall.SIGTERM); err != nil {

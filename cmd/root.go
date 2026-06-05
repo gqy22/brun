@@ -314,6 +314,16 @@ func BuildMetadataYAML(run *internal.Run) string {
 	if run.PythonVersion != "" {
 		fmt.Fprintf(&b, "python_version: %s\n", run.PythonVersion)
 	}
+	fmt.Fprintf(&b, "resource_supported: %t\n", run.ResourceSupported)
+	if run.ResourceStatus != "" {
+		fmt.Fprintf(&b, "resource_status: %s\n", run.ResourceStatus)
+	}
+	if run.PeakRSSKB > 0 {
+		fmt.Fprintf(&b, "peak_rss_kb: %d\n", run.PeakRSSKB)
+	}
+	if run.CPUTimeMs > 0 {
+		fmt.Fprintf(&b, "cpu_time_ms: %d\n", run.CPUTimeMs)
+	}
 	if run.DiagInfoCount > 0 {
 		fmt.Fprintf(&b, "diag_info_count: %d\n", run.DiagInfoCount)
 	}

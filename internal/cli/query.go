@@ -121,26 +121,28 @@ func showCmd() *cobra.Command {
 			}
 
 			detail := &cmd.RunDetail{
-				ID:            r.ID,
-				Name:          r.Name,
-				Project:       r.Project,
-				Status:        r.Status,
-				Command:       r.Command,
-				CWD:           r.CWD,
-				StartedAt:     r.StartedAt,
-				EndedAt:       r.EndedAt,
-				Duration:      cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
-				ExitCode:      r.ExitCode,
-				PeakRSSKB:     r.PeakRSSKB,
-				CPUTimeMs:     r.CPUTimeMs,
-				GitRepo:       r.GitRepo,
-				GitCommit:     r.GitCommit,
-				GitDirty:      r.GitDirty,
-				Tags:          tags,
-				Note:          note,
-				Diag:          toCmdDiagnosticDetail(internal.DiagnosticSummaryFromRun(r)),
-				CWDSource:     r.CWDSource,
-				ProjectSource: r.ProjectSource,
+				ID:                r.ID,
+				Name:              r.Name,
+				Project:           r.Project,
+				Status:            r.Status,
+				Command:           r.Command,
+				CWD:               r.CWD,
+				StartedAt:         r.StartedAt,
+				EndedAt:           r.EndedAt,
+				Duration:          cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
+				ExitCode:          r.ExitCode,
+				PeakRSSKB:         r.PeakRSSKB,
+				CPUTimeMs:         r.CPUTimeMs,
+				ResourceSupported: r.ResourceSupported,
+				ResourceStatus:    r.ResourceStatus,
+				GitRepo:           r.GitRepo,
+				GitCommit:         r.GitCommit,
+				GitDirty:          r.GitDirty,
+				Tags:              tags,
+				Note:              note,
+				Diag:              toCmdDiagnosticDetail(internal.DiagnosticSummaryFromRun(r)),
+				CWDSource:         r.CWDSource,
+				ProjectSource:     r.ProjectSource,
 			}
 			fmt.Print(cmd.FormatShow(detail))
 			return nil
@@ -175,6 +177,8 @@ type runJSONPayload struct {
 	CondaEnv          string                     `json:"conda_env,omitempty"`
 	CondaPrefix       string                     `json:"conda_prefix,omitempty"`
 	PythonVersion     string                     `json:"python_version,omitempty"`
+	ResourceSupported bool                       `json:"resource_supported"`
+	ResourceStatus    string                     `json:"resource_status,omitempty"`
 	PeakRSSKB         int64                      `json:"peak_rss_kb"`
 	CPUTimeMs         int64                      `json:"cpu_time_ms"`
 	Tags              []string                   `json:"tags,omitempty"`
@@ -207,6 +211,8 @@ func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
 		CondaEnv:          r.CondaEnv,
 		CondaPrefix:       r.CondaPrefix,
 		PythonVersion:     r.PythonVersion,
+		ResourceSupported: r.ResourceSupported,
+		ResourceStatus:    r.ResourceStatus,
 		PeakRSSKB:         r.PeakRSSKB,
 		CPUTimeMs:         r.CPUTimeMs,
 		Tags:              tags,

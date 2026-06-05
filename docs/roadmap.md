@@ -94,14 +94,15 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 近期建议优先级：
 
-1. 资源能力显式化：非 Linux 时返回能力状态，而不是让 UI 把“不支持”看成 0。
-2. Git/hostname/username 采集状态显式化。Git 暂不作为当前优先项，hostname/username 可先做轻量状态字段。
-3. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
-4. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
+1. Git/hostname/username 采集状态显式化。Git 暂不作为当前优先项，hostname/username 可先做轻量状态字段。
+2. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
+3. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
 
 已完成：Web 启动语义已收紧，显式 `--port` 被占用时会直接失败；未显式指定端口时才保留自动寻找后续端口。Web processes/logs API 已返回 `process_source`、`activity_sampled`、`last_log_status` 和 logs `status`，避免把降级状态伪装成空值。
 
 已完成：Conda 状态已进入 run 审计链路。`brun run` 会记录 `conda_status=ok|partial|not_detected`、`conda_env`、`conda_prefix` 和 `python_version`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail。
+
+已完成：资源采样能力已显式化。`brun run` 会记录 `resource_supported` 和 `resource_status=ok|unavailable|unsupported`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail，避免把“不支持采样”显示成真实 0。
 
 ## 中长期：任务调度与依赖运行
 

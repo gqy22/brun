@@ -20,26 +20,28 @@ type RunRow struct {
 }
 
 type RunDetail struct {
-	ID            string
-	Name          string
-	Project       string
-	ProjectSource string
-	Status        string
-	Command       string
-	CWD           string
-	CWDSource     string
-	StartedAt     string
-	EndedAt       string
-	Duration      string
-	ExitCode      int
-	PeakRSSKB     int64
-	CPUTimeMs     int64
-	GitRepo       string
-	GitCommit     string
-	GitDirty      bool
-	Tags          []string
-	Note          string
-	Diag          DiagnosticDetail
+	ID                string
+	Name              string
+	Project           string
+	ProjectSource     string
+	Status            string
+	Command           string
+	CWD               string
+	CWDSource         string
+	StartedAt         string
+	EndedAt           string
+	Duration          string
+	ExitCode          int
+	PeakRSSKB         int64
+	CPUTimeMs         int64
+	ResourceSupported bool
+	ResourceStatus    string
+	GitRepo           string
+	GitCommit         string
+	GitDirty          bool
+	Tags              []string
+	Note              string
+	Diag              DiagnosticDetail
 }
 
 type DiagnosticDetail struct {
@@ -154,6 +156,13 @@ func FormatShow(r *RunDetail) string {
 		if r.CPUTimeMs > 0 {
 			fmt.Fprintf(&b, "%s  %s\n", Bold("CPU Time:"), fmtCPU(r.CPUTimeMs))
 		}
+	}
+	if r.ResourceStatus != "" {
+		fmt.Fprintf(&b, "%s  %s", Bold("Resource Status:"), r.ResourceStatus)
+		if !r.ResourceSupported {
+			fmt.Fprintf(&b, " (unsupported)")
+		}
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "%s  %d\n", Bold("Exit Code:"), r.ExitCode)
 	if r.Diag.WarningCount > 0 || r.Diag.ErrorCount > 0 {

@@ -169,6 +169,40 @@ func TestApiGetRun_ReturnsCondaMetadata(t *testing.T) {
 	}
 }
 
+func TestApiGetRun_ReturnsResourceMetadata(t *testing.T) {
+	srv, runID := newTestServer(t)
+	run, err := srv.store.GetRun(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.DeleteRun(runID); err != nil {
+		t.Fatal(err)
+	}
+	run.ResourceSupported = true
+	run.ResourceStatus = "ok"
+	run.PeakRSSKB = 1024
+	run.CPUTimeMs = 25
+	if err := srv.store.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+
+	w := srv.doReq("GET", "/api/runs/"+runID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["resource_supported"] != true || resp["resource_status"] != "ok" {
+		t.Fatalf("unexpected resource metadata: %+v", resp)
+	}
+	if resp["peak_rss_kb"] != float64(1024) || resp["cpu_time_ms"] != float64(25) {
+		t.Fatalf("unexpected resource values: %+v", resp)
+	}
+}
+
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body
 func (ts *testSrv) fetchSSE(t *testing.T, urlPath string, timeout time.Duration) ([]byte, int) {
 	t.Helper()

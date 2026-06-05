@@ -365,7 +365,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 保存资源数据
-	if err := store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs); err != nil {
+	if err := store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus); err != nil {
 		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
 	}
 
@@ -374,6 +374,10 @@ func executeRun(args []string, name, project, note string, tags []string,
 	runRecord.ExitCode = result.ExitCode
 	runRecord.EndedAt = result.EndedAt
 	runRecord.DurationMs = result.DurationMs
+	runRecord.PeakRSSKB = result.PeakRSSKB
+	runRecord.CPUTimeMs = result.CPUTimeMs
+	runRecord.ResourceSupported = result.ResourceSupported
+	runRecord.ResourceStatus = result.ResourceStatus
 	if summary, err := internal.ReadDiagnosticSummary(runDir); err == nil {
 		runRecord.DiagInfoCount = summary.InfoCount
 		runRecord.DiagWarningCount = summary.WarningCount

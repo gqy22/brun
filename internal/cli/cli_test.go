@@ -170,19 +170,23 @@ func TestShowCmdJSONOutput(t *testing.T) {
 	}
 	defer store.Close()
 	if err := store.CreateRun(&internal.Run{
-		ID:            runID,
-		Project:       "proj",
-		ProjectSource: "explicit",
-		CWD:           "/tmp",
-		CWDSource:     "explicit",
-		Command:       "echo hi",
-		Status:        "success",
-		StartedAt:     time.Now().UTC().Format(time.RFC3339),
-		RunDir:        filepath.Join(home, "runs", "x"),
-		CondaStatus:   "ok",
-		CondaEnv:      "rnaseq",
-		CondaPrefix:   "/opt/conda/envs/rnaseq",
-		PythonVersion: "Python 3.11.8",
+		ID:                runID,
+		Project:           "proj",
+		ProjectSource:     "explicit",
+		CWD:               "/tmp",
+		CWDSource:         "explicit",
+		Command:           "echo hi",
+		Status:            "success",
+		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		RunDir:            filepath.Join(home, "runs", "x"),
+		CondaStatus:       "ok",
+		CondaEnv:          "rnaseq",
+		CondaPrefix:       "/opt/conda/envs/rnaseq",
+		PythonVersion:     "Python 3.11.8",
+		ResourceSupported: true,
+		ResourceStatus:    "ok",
+		PeakRSSKB:         1024,
+		CPUTimeMs:         25,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +201,16 @@ func TestShowCmdJSONOutput(t *testing.T) {
 		t.Fatalf("showCmd() error = %v", err)
 	}
 	var resp struct {
-		ID            string `json:"id"`
-		ProjectSource string `json:"project_source"`
-		CWDSource     string `json:"cwd_source"`
-		CondaStatus   string `json:"conda_status"`
-		CondaEnv      string `json:"conda_env"`
-		PythonVersion string `json:"python_version"`
+		ID                string `json:"id"`
+		ProjectSource     string `json:"project_source"`
+		CWDSource         string `json:"cwd_source"`
+		CondaStatus       string `json:"conda_status"`
+		CondaEnv          string `json:"conda_env"`
+		PythonVersion     string `json:"python_version"`
+		ResourceSupported bool   `json:"resource_supported"`
+		ResourceStatus    string `json:"resource_status"`
+		PeakRSSKB         int64  `json:"peak_rss_kb"`
+		CPUTimeMs         int64  `json:"cpu_time_ms"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
 		t.Fatalf("json decode: %v\n%s", err, out.String())
@@ -212,6 +220,9 @@ func TestShowCmdJSONOutput(t *testing.T) {
 	}
 	if resp.CondaStatus != "ok" || resp.CondaEnv != "rnaseq" || resp.PythonVersion != "Python 3.11.8" {
 		t.Fatalf("unexpected conda json: %+v", resp)
+	}
+	if !resp.ResourceSupported || resp.ResourceStatus != "ok" || resp.PeakRSSKB != 1024 || resp.CPUTimeMs != 25 {
+		t.Fatalf("unexpected resource json: %+v", resp)
 	}
 }
 
@@ -332,7 +343,7 @@ func TestExecuteRunUsesProvidedRunID(t *testing.T) {
 func TestReadRunMetadata(t *testing.T) {
 	runDir := fastTempDir(t)
 	path := filepath.Join(runDir, "metadata.yaml")
-	data := []byte("id: r1\nproject: p\ncommand: echo hi\nstatus: success\nexit_code: 0\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\nended_at: 2026-06-05T01:00:01Z\nduration_ms: 1000\nconda_status: ok\nconda_env: rnaseq\nconda_prefix: /opt/conda/envs/rnaseq\npython_version: Python 3.11.8\n")
+	data := []byte("id: r1\nproject: p\ncommand: echo hi\nstatus: success\nexit_code: 0\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\nended_at: 2026-06-05T01:00:01Z\nduration_ms: 1000\nconda_status: ok\nconda_env: rnaseq\nconda_prefix: /opt/conda/envs/rnaseq\npython_version: Python 3.11.8\nresource_supported: true\nresource_status: ok\npeak_rss_kb: 1024\ncpu_time_ms: 25\n")
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -346,6 +357,9 @@ func TestReadRunMetadata(t *testing.T) {
 	}
 	if run.CondaStatus != "ok" || run.CondaEnv != "rnaseq" || run.PythonVersion != "Python 3.11.8" {
 		t.Fatalf("unexpected conda metadata: %+v", run)
+	}
+	if !run.ResourceSupported || run.ResourceStatus != "ok" || run.PeakRSSKB != 1024 || run.CPUTimeMs != 25 {
+		t.Fatalf("unexpected resource metadata: %+v", run)
 	}
 }
 

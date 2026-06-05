@@ -333,29 +333,33 @@ func loadRunsFromMetadata(root string) ([]*internal.Run, error) {
 }
 
 type runMetadata struct {
-	ID               string `yaml:"id"`
-	Name             string `yaml:"name"`
-	Project          string `yaml:"project"`
-	Command          string `yaml:"command"`
-	Status           string `yaml:"status"`
-	ExitCode         int    `yaml:"exit_code"`
-	CWD              string `yaml:"cwd"`
-	StartedAt        string `yaml:"started_at"`
-	EndedAt          string `yaml:"ended_at"`
-	DurationMs       int64  `yaml:"duration_ms"`
-	GitCommit        string `yaml:"git_commit"`
-	GitDirty         bool   `yaml:"git_dirty"`
-	CondaStatus      string `yaml:"conda_status"`
-	CondaEnv         string `yaml:"conda_env"`
-	CondaPrefix      string `yaml:"conda_prefix"`
-	PythonVersion    string `yaml:"python_version"`
-	CWDSource        string `yaml:"cwd_source"`
-	ProjectSource    string `yaml:"project_source"`
-	DiagInfoCount    int    `yaml:"diag_info_count"`
-	DiagWarningCount int    `yaml:"diag_warning_count"`
-	DiagErrorCount   int    `yaml:"diag_error_count"`
-	DiagLastCode     string `yaml:"diag_last_code"`
-	DiagLastAt       string `yaml:"diag_last_at"`
+	ID                string `yaml:"id"`
+	Name              string `yaml:"name"`
+	Project           string `yaml:"project"`
+	Command           string `yaml:"command"`
+	Status            string `yaml:"status"`
+	ExitCode          int    `yaml:"exit_code"`
+	CWD               string `yaml:"cwd"`
+	StartedAt         string `yaml:"started_at"`
+	EndedAt           string `yaml:"ended_at"`
+	DurationMs        int64  `yaml:"duration_ms"`
+	GitCommit         string `yaml:"git_commit"`
+	GitDirty          bool   `yaml:"git_dirty"`
+	CondaStatus       string `yaml:"conda_status"`
+	CondaEnv          string `yaml:"conda_env"`
+	CondaPrefix       string `yaml:"conda_prefix"`
+	PythonVersion     string `yaml:"python_version"`
+	ResourceSupported bool   `yaml:"resource_supported"`
+	ResourceStatus    string `yaml:"resource_status"`
+	PeakRSSKB         int64  `yaml:"peak_rss_kb"`
+	CPUTimeMs         int64  `yaml:"cpu_time_ms"`
+	CWDSource         string `yaml:"cwd_source"`
+	ProjectSource     string `yaml:"project_source"`
+	DiagInfoCount     int    `yaml:"diag_info_count"`
+	DiagWarningCount  int    `yaml:"diag_warning_count"`
+	DiagErrorCount    int    `yaml:"diag_error_count"`
+	DiagLastCode      string `yaml:"diag_last_code"`
+	DiagLastAt        string `yaml:"diag_last_at"`
 }
 
 func readRunMetadata(path string) (*internal.Run, error) {
@@ -371,29 +375,33 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		return nil, fmt.Errorf("missing id")
 	}
 	return &internal.Run{
-		ID:               meta.ID,
-		Name:             meta.Name,
-		Project:          meta.Project,
-		Command:          meta.Command,
-		Status:           meta.Status,
-		ExitCode:         meta.ExitCode,
-		CWD:              meta.CWD,
-		StartedAt:        meta.StartedAt,
-		EndedAt:          meta.EndedAt,
-		DurationMs:       meta.DurationMs,
-		GitCommit:        meta.GitCommit,
-		GitDirty:         meta.GitDirty,
-		CondaStatus:      meta.CondaStatus,
-		CondaEnv:         meta.CondaEnv,
-		CondaPrefix:      meta.CondaPrefix,
-		PythonVersion:    meta.PythonVersion,
-		CWDSource:        meta.CWDSource,
-		ProjectSource:    meta.ProjectSource,
-		DiagInfoCount:    meta.DiagInfoCount,
-		DiagWarningCount: meta.DiagWarningCount,
-		DiagErrorCount:   meta.DiagErrorCount,
-		DiagLastCode:     meta.DiagLastCode,
-		DiagLastAt:       meta.DiagLastAt,
+		ID:                meta.ID,
+		Name:              meta.Name,
+		Project:           meta.Project,
+		Command:           meta.Command,
+		Status:            meta.Status,
+		ExitCode:          meta.ExitCode,
+		CWD:               meta.CWD,
+		StartedAt:         meta.StartedAt,
+		EndedAt:           meta.EndedAt,
+		DurationMs:        meta.DurationMs,
+		GitCommit:         meta.GitCommit,
+		GitDirty:          meta.GitDirty,
+		CondaStatus:       meta.CondaStatus,
+		CondaEnv:          meta.CondaEnv,
+		CondaPrefix:       meta.CondaPrefix,
+		PythonVersion:     meta.PythonVersion,
+		ResourceSupported: meta.ResourceSupported,
+		ResourceStatus:    meta.ResourceStatus,
+		PeakRSSKB:         meta.PeakRSSKB,
+		CPUTimeMs:         meta.CPUTimeMs,
+		CWDSource:         meta.CWDSource,
+		ProjectSource:     meta.ProjectSource,
+		DiagInfoCount:     meta.DiagInfoCount,
+		DiagWarningCount:  meta.DiagWarningCount,
+		DiagErrorCount:    meta.DiagErrorCount,
+		DiagLastCode:      meta.DiagLastCode,
+		DiagLastAt:        meta.DiagLastAt,
 	}, nil
 }
 

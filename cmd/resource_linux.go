@@ -18,6 +18,8 @@ type ResourceUsage struct {
 	CPUTimeMs int64
 }
 
+func ResourceSupported() bool { return true }
+
 type ProcessInfo struct {
 	PID        int    `json:"pid"`
 	PPID       int    `json:"ppid"`
