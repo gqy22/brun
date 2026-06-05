@@ -125,7 +125,7 @@
 - 类型：`diagnosed-degrade`
 - 位置：`internal/cli/run.go`
 - 当前行为：`os.WriteFile(metadata.yaml)` 返回错误时写入 warning，并在 run 结束摘要中提示。
-- 影响：run 目录中的离线元数据可能缺失，但 SQLite run 记录仍会更新；`repair-index` 无法从缺失的 metadata 重建这条 run。
+- 影响：run 目录中的离线元数据可能缺失，但 SQLite run 记录仍会更新；`repair` 无法从缺失的 metadata 重建这条 run。
 - 当前治理：metadata 写入失败会进入 run 级诊断摘要，`brun list` 和 Web 列表不需要扫描 `diagnostics.jsonl` 也能看到警告。
 - 建议：继续保留 SQLite 更新优先级。
 
@@ -303,7 +303,7 @@
 - 位置：`internal/store.go`
 - 当前行为：SQLite 默认使用 `BRUN_SQLITE_SYNC=off`，把数据库定位为快速索引层；run 目录中的 `metadata.yaml`、日志和诊断文件是主审计载体。用户可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full` 提升写入一致性。
 - 影响：极端情况下，例如机器断电或文件系统崩溃，最近一次 SQLite 写入可能丢失或损坏，但 run 目录仍保留审计文件。
-- 建议：保留该默认值以保证短任务体验。当前已提供 `brun repair-index --write` 从 run 目录重建缺失 run 索引；后续如需恢复 artifacts/tags/notes，需要扩展 metadata 或增加独立审计文件。
+- 建议：保留该默认值以保证短任务体验。当前已提供 `brun repair --write` 从 run 目录重建缺失 run 索引；后续如需恢复 artifacts/tags/notes，需要扩展 metadata 或增加独立审计文件。
 
 ### 37. latest 伪 run id
 
@@ -341,7 +341,7 @@
 当前已经不需要继续做目录架构拆分。下一轮更值得做的是“Web 启动语义”和“剩余状态显式化”：
 
 1. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
-2. 剩余错误结构化：数据库损坏/缺失提示 `repair-index`，日志不可读提示 run 状态和 run_dir。
+2. 剩余错误结构化：数据库损坏/缺失提示 `repair`，日志不可读提示 run 状态和 run_dir。
 3. 资源能力显式化：非 Linux 时返回 `resource_supported=false`，不要把“不支持”显示成 0。
 4. Git/Conda/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
 

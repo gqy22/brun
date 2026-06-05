@@ -215,14 +215,14 @@ func cleanCmd() *cobra.Command {
 	return c
 }
 
-func repairIndexCmd() *cobra.Command {
+func repairCmd() *cobra.Command {
 	var write bool
 	c := &cobra.Command{
-		Use:   "repair-index",
+		Use:   "repair",
 		Short: "从 run 目录重建 SQLite 索引",
 		Long:  "扫描 runs 目录中的 metadata.yaml，重建 SQLite run 索引。默认只预览，使用 --write 才会写入数据库。",
-		Example: `  brun repair-index
-  brun repair-index --write`,
+		Example: `  brun repair
+  brun repair --write`,
 		RunE: func(c *cobra.Command, args []string) error {
 			runs, err := loadRunsFromMetadata(internal.RunsRoot())
 			if err != nil {
@@ -357,7 +357,7 @@ func webCmd() *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
-				return cliError("database_open_failed", "打开数据库失败: "+err.Error(), "检查 BRUN_HOME 是否可写；如索引损坏，可尝试 brun repair-index --write", err)
+				return cliError("database_open_failed", "打开数据库失败: "+err.Error(), "检查 BRUN_HOME 是否可写；如索引损坏，可尝试 brun repair --write", err)
 			}
 
 			if addr == "" {

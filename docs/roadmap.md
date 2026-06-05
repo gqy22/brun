@@ -76,7 +76,7 @@ web/
 
 运行诊断已经落地：`brun run` 会把推断行为和关键写入失败记录到 run 目录下的 `diagnostics.jsonl`，并在前台运行结束时输出 warning 摘要。诊断摘要已经写入 SQLite，`brun list`、`brun show` 和 Web 列表可以直接展示 warning/error 状态；`brun diag` 用于查看完整诊断事件。
 
-SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.o`、`stderr.er`、`metadata.yaml` 和 `diagnostics.jsonl` 是主审计载体。默认 `BRUN_SQLITE_SYNC=off` 用于避免短任务被 SQLite 同步拖慢；需要更强写入一致性时可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full`。如果索引缺失或损坏，使用 `brun repair-index --write` 从 run 目录重建缺失的 run 记录。
+SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.o`、`stderr.er`、`metadata.yaml` 和 `diagnostics.jsonl` 是主审计载体。默认 `BRUN_SQLITE_SYNC=off` 用于避免短任务被 SQLite 同步拖慢；需要更强写入一致性时可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full`。如果索引缺失或损坏，使用 `brun repair --write` 从 run 目录重建缺失的 run 记录。
 
 建议优先级：
 

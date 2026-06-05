@@ -78,7 +78,7 @@ func Execute(opts Options) error {
 		noteCmd(),
 		rerunCmd(),
 		cleanCmd(),
-		repairIndexCmd(),
+		repairCmd(),
 		webCmd(),
 	)
 	// 替换内置命令为中文描述
