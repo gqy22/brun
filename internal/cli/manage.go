@@ -345,19 +345,19 @@ func webCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "web",
 		Short: "启动 Web Dashboard（局域网访问）",
-		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认监听 0.0.0.0:9213。",
+		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认监听 0.0.0.0:9213；未显式指定 --port 时会自动避开占用端口，显式指定 --port 时端口不可用会直接报错。",
 		Example: `  # 启动 Web Dashboard
   brun web
 
-  # 指定端口
+  # 指定端口；如果端口被占用会直接失败
   brun web --port 9090
 
-  # 局域网可访问
+  # 明确局域网监听地址
   brun web --addr 0.0.0.0`,
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
-				return fmt.Errorf("打开数据库失败: %w", err)
+				return cliError("database_open_failed", "打开数据库失败: "+err.Error(), "检查 BRUN_HOME 是否可写；如索引损坏，可尝试 brun repair-index --write", err)
 			}
 
 			if addr == "" {
@@ -368,11 +368,17 @@ func webCmd() *cobra.Command {
 			}
 
 			srv := cmd.NewWebServer(store, addr, port, webassets.Templates, webassets.Static)
-			return srv.ListenAndServe()
+			if c.Flags().Changed("port") {
+				srv.SetAutoIncrementPort(false)
+			}
+			if err := srv.ListenAndServe(); err != nil {
+				return cliError("web_listen_failed", "Web 服务启动失败: "+err.Error(), "如果端口被占用，请换一个 --port；局域网访问可显式使用 --addr 0.0.0.0", err)
+			}
+			return nil
 		},
 	}
-	c.Flags().IntVarP(&port, "port", "p", 9213, "监听端口")
-	c.Flags().StringVar(&addr, "addr", "0.0.0.0", "监听地址")
+	c.Flags().IntVarP(&port, "port", "p", 9213, "监听端口；显式指定时不会自动递增")
+	c.Flags().StringVar(&addr, "addr", "0.0.0.0", "监听地址；默认允许局域网访问")
 	return c
 }
 

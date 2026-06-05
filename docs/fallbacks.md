@@ -163,11 +163,11 @@
 
 ### 19. Web 端口自动递增
 
-- 类型：`retry`
+- 类型：`partial-resolved`
 - 位置：`cmd/web.go:63`
-- 当前行为：指定端口占用时自动尝试后续最多 20 个端口。
-- 影响：用户指定 `--port 9090` 但实际可能监听 9091+，脚本化场景容易出错。
-- 建议：如果用户显式传了 `--port`，端口被占用应报错；只有未显式指定端口时才可自动递增，并清晰提示。
+- 当前行为：未显式指定 `--port` 时，如果默认端口被占用，会自动尝试后续最多 20 个端口；显式指定 `--port` 时，端口不可用会直接报错并输出 `web_listen_failed`。
+- 影响：脚本化场景不会再出现指定 `--port 9090` 但实际监听 9091+ 的行为漂移；默认交互场景仍能自动避开占用端口。
+- 建议：保留当前分层。后续如果需要完全可预测，也可以增加 `--no-port-fallback` 或改为默认也不递增。
 
 ### 20. Conda 环境信息缺失时静默降级
 
@@ -267,27 +267,27 @@
 
 ### 32. 进程树采集失败后退回进程组扫描
 
-- 类型：`degrade`
+- 类型：`partial-resolved`
 - 位置：`cmd/web.go:375`, `cmd/resource_linux.go:158`
-- 当前行为：Web processes API 先按 `/proc/<pid>/task/<pid>/children` 递归采集进程树；如果没有结果，则退回 `ListProcessGroup(pid)`。
+- 当前行为：Web processes API 先按 `/proc/<pid>/task/<pid>/children` 递归采集进程树；如果没有结果，则退回 `ListProcessGroup(pid)`；响应中返回 `process_source=tree|group|empty`。
 - 影响：退回进程组扫描后可能丢失 depth/role 层级语义，也可能漏掉跨进程组但仍是子孙的进程。
-- 建议：响应中增加诊断字段，例如 `process_source=tree|group|empty`，让 UI 和 API 调用方知道当前数据来自哪种采集路径。
+- 建议：保留响应字段。后续如需更强诊断，可以把采样失败原因也写入 run 级诊断。
 
 ### 33. 进程 activity 采样失败时沿用第一帧
 
-- 类型：`degrade`
+- 类型：`partial-resolved`
 - 位置：`cmd/resource_linux.go:158`
-- 当前行为：`ListProcessTreeWithActivity` 先采第一帧，短暂等待后采第二帧；如果第二帧为空，则返回第一帧并按状态推断 active。
+- 当前行为：`ListProcessTreeWithActivity` 先采第一帧，短暂等待后采第二帧；如果第二帧为空，则返回第一帧并按状态推断 active。Web processes API 返回 `activity_sampled=true|false`。
 - 影响：`active_count` 和 `cpu_delta_ms` 可能偏保守，用户无法区分“进程确实不活跃”和“采样窗口内进程消失/采样失败”。
-- 建议：增加 activity 采样状态，例如 `activity_sampled=true|false` 或 `sample_interval_ms`，并在 UI 摘要中保留诊断信息。
+- 建议：保留 `activity_sampled`。后续可增加 `sample_interval_ms`，让 API 消费方知道采样窗口。
 
 ### 34. Last log update 缺失时返回空值
 
-- 类型：`default`
+- 类型：`resolved`
 - 位置：`cmd/web.go:727`
-- 当前行为：如果 stdout/stderr 都不存在或无法 stat，`last_log_update` 和 `last_log_update_ago` 返回空字符串。
-- 影响：UI 会隐藏 Last Log，用户无法区分“没有日志文件”和“日志很久没更新但可读”。
-- 建议：返回明确状态，例如 `last_log_status=missing|unreadable|ok`，或在诊断摘要中显示 `no log files`。
+- 当前行为：如果 stdout/stderr 都不存在或无法 stat，`last_log_update` 和 `last_log_update_ago` 仍为空，同时返回 `last_log_status=missing|unreadable|ok`。普通 logs API 也返回 `status=missing|unreadable|ok`。
+- 影响：UI 和智能体可以区分“没有日志文件”“日志不可读”和“日志可读但无新增内容”。
+- 建议：保持显式状态字段。
 
 ### 35. 进程角色无法识别时归为 worker
 
@@ -331,20 +331,19 @@
 
 ## 建议清理顺序
 
-1. 继续处理会造成行为漂移的 fallback：Web 端口自动递增、Web 默认监听地址。
-2. 把剩余高频失败迁入结构化错误：数据库损坏/缺失、日志文件缺失、Web 端口占用。
-3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、进程诊断采样状态、Git 信息采集、Conda 信息采集、HomeDir 默认值。
+1. 继续处理会造成行为漂移的 fallback：Web 默认监听地址是否继续保留局域网默认，或增加更明确的安全提示。
+2. 把剩余高频失败迁入结构化错误：数据库损坏/缺失、日志文件不可读。
+3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、Git 信息采集、Conda 信息采集、HomeDir 默认值。
 4. 最后评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
 
 ## 下一轮优化方向
 
 当前已经不需要继续做目录架构拆分。下一轮更值得做的是“Web 启动语义”和“剩余状态显式化”：
 
-1. Web 启动语义收紧：显式 `--port` 被占用时直接失败；如保留端口递增，只允许默认端口自动寻找。
-2. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
-3. 剩余错误结构化：数据库损坏/缺失提示 `repair-index`，日志文件缺失提示 run 状态和 run_dir。
-4. 资源能力显式化：非 Linux 或采样失败时返回 `resource_supported=false` / `activity_sampled=false`，不要把“不支持”显示成 0。
-5. Git/Conda/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
+1. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
+2. 剩余错误结构化：数据库损坏/缺失提示 `repair-index`，日志不可读提示 run 状态和 run_dir。
+3. 资源能力显式化：非 Linux 时返回 `resource_supported=false`，不要把“不支持”显示成 0。
+4. Git/Conda/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
 
 ## 保留候选
 

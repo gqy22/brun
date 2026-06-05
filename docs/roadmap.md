@@ -80,11 +80,12 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 建议优先级：
 
-1. 收紧 Web 启动语义：显式端口占用时不要静默漂移，默认监听地址要在 help 和启动输出中讲清楚。
-2. 资源能力显式化：非 Linux 或采样失败时返回能力/采样状态，而不是让 UI 把“不支持”看成 0。
-3. Git/Conda/hostname/username 采集状态显式化。
-4. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
-5. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
+1. 资源能力显式化：非 Linux 时返回能力状态，而不是让 UI 把“不支持”看成 0。
+2. Git/Conda/hostname/username 采集状态显式化。
+3. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
+4. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
+
+已完成：Web 启动语义已收紧，显式 `--port` 被占用时会直接失败；未显式指定端口时才保留自动寻找后续端口。Web processes/logs API 已返回 `process_source`、`activity_sampled`、`last_log_status` 和 logs `status`，避免把降级状态伪装成空值。
 
 ## 任务调度与依赖运行
 

@@ -184,9 +184,13 @@ func TestApiGetLogs_WithOffset_ReturnsCurrentSize(t *testing.T) {
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	size := resp["size"].(float64)
+	status := resp["status"].(string)
 
 	if size != 12 {
 		t.Errorf("size = %v, want 12", size)
+	}
+	if status != "ok" {
+		t.Errorf("status = %q, want ok", status)
 	}
 }
 
@@ -222,6 +226,28 @@ func TestApiGetLogs_NonExistentRun_Returns404(t *testing.T) {
 
 	if w.Code != 404 {
 		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestApiGetLogs_MissingLogReportsStatus(t *testing.T) {
+	srv, runID := newTestServer(t)
+	runDir := srv.getTestRunDir(t, runID)
+	if err := os.Remove(filepath.Join(runDir, "stdout.o")); err != nil {
+		t.Fatalf("remove stdout: %v", err)
+	}
+
+	w := srv.doReq("GET", "/api/runs/"+runID+"/logs?stream=stdout")
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "missing" {
+		t.Fatalf("log status = %q, want missing", resp["status"])
+	}
+	if resp["content"] != "" {
+		t.Fatalf("content = %q, want empty", resp["content"])
 	}
 }
 
@@ -383,8 +409,43 @@ func TestApiGetProcesses_ReturnsSummary(t *testing.T) {
 	if resp.Summary.LastLogUpdate == "" {
 		t.Fatal("last_log_update should not be empty")
 	}
+	if resp.Summary.LastLogStatus != "ok" {
+		t.Fatalf("last_log_status = %q, want ok", resp.Summary.LastLogStatus)
+	}
 	if resp.Summary.ProcessCount < 1 {
 		t.Fatalf("process_count = %d, want >= 1", resp.Summary.ProcessCount)
+	}
+}
+
+func TestReadLastLogUpdateReportsMissing(t *testing.T) {
+	updatedAt, ago, status := readLastLogUpdate(t.TempDir())
+	if updatedAt != "" || ago != "" || status != "missing" {
+		t.Fatalf("readLastLogUpdate() = %q, %q, %q; want empty, empty, missing", updatedAt, ago, status)
+	}
+}
+
+func TestWebServerExplicitPortDoesNotAutoIncrement(t *testing.T) {
+	store, err := internal.NewStore(filepath.Join(fastTempDir(t), "test.db"))
+	if err != nil {
+		t.Fatalf("创建测试 store 失败: %v", err)
+	}
+	defer store.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ws := NewWebServer(store, "127.0.0.1", port, os.DirFS("../web/templates"), os.DirFS("../web/static"))
+	ws.SetAutoIncrementPort(false)
+	err = ws.ListenAndServe()
+	if err == nil {
+		t.Fatal("ListenAndServe() error = nil, want port unavailable")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("端口 %d 不可用", port)) {
+		t.Fatalf("error = %q, want explicit port unavailable", err)
 	}
 }
 

@@ -74,7 +74,7 @@ brun script --latest
 
 ```bash
 brun web
-open http://localhost:9213
+open http://<host>:9213
 ```
 
 ## 为什么不是 nohup
@@ -189,8 +189,9 @@ brun rerun --latest                # 确认后真正复跑
 启动后浏览器访问即可使用完整可视化管理界面：
 
 ```bash
-brun web                    # 默认端口 9213
-brun web --port 8080        # 自定义端口
+brun web                    # 默认监听 0.0.0.0:9213；端口占用时自动寻找后续端口
+brun web --port 8080        # 自定义端口；端口占用时直接失败
+brun web --addr 127.0.0.1   # 仅本机访问
 ```
 
 功能概览：

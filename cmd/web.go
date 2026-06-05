@@ -25,24 +25,33 @@ type RunProcessSummary struct {
 	TotalRSSKB       int64  `json:"total_rss_kb"`
 	LastLogUpdate    string `json:"last_log_update"`
 	LastLogUpdateAgo string `json:"last_log_update_ago"`
+	LastLogStatus    string `json:"last_log_status"`
+	ProcessSource    string `json:"process_source"`
+	ActivitySampled  bool   `json:"activity_sampled"`
 }
 
 type WebServer struct {
-	store   *internal.Store
-	addr    string
-	port    int
-	tmplDir fs.FS
-	static  fs.FS
+	store         *internal.Store
+	addr          string
+	port          int
+	autoIncrement bool
+	tmplDir       fs.FS
+	static        fs.FS
 }
 
 func NewWebServer(store *internal.Store, addr string, port int, tmplFS, staticFS fs.FS) *WebServer {
 	return &WebServer{
-		store:   store,
-		addr:    addr,
-		port:    port,
-		tmplDir: tmplFS,
-		static:  staticFS,
+		store:         store,
+		addr:          addr,
+		port:          port,
+		autoIncrement: true,
+		tmplDir:       tmplFS,
+		static:        staticFS,
 	}
+}
+
+func (s *WebServer) SetAutoIncrementPort(enabled bool) {
+	s.autoIncrement = enabled
 }
 
 func (s *WebServer) ListenAndServe() error {
@@ -74,10 +83,13 @@ func (s *WebServer) ListenAndServe() error {
 		addr := fmt.Sprintf("%s:%d", s.addr, p)
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
-			if attempt < 20 {
+			if s.autoIncrement && attempt < 20 {
 				continue
 			}
-			return fmt.Errorf("端口 %d-%d 均被占用，请手动指定 --port", s.port, p-1)
+			if s.autoIncrement {
+				return fmt.Errorf("端口 %d-%d 均被占用，请手动指定 --port", s.port, p-1)
+			}
+			return fmt.Errorf("端口 %d 不可用: %w", s.port, err)
 		}
 		if attempt > 0 {
 			internal.Log().Warn("web_port_in_use", "port", s.port, "using", p)
@@ -224,7 +236,16 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		jsonResponse(w, map[string]string{"content": "", "stream": stream})
+		status := "unreadable"
+		if os.IsNotExist(err) {
+			status = "missing"
+		}
+		jsonResponse(w, map[string]any{
+			"content": "",
+			"stream":  stream,
+			"status":  status,
+			"size":    0,
+		})
 		return
 	}
 
@@ -235,6 +256,7 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, map[string]any{
 				"content": "",
 				"stream":  stream,
+				"status":  "ok",
 				"size":    fileSize,
 			})
 			return
@@ -250,6 +272,7 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]any{
 		"content": content,
 		"stream":  stream,
+		"status":  "ok",
 		"size":    fileSize,
 	})
 }
@@ -387,16 +410,15 @@ func (s *WebServer) apiGetProcesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	procs := ListProcessTreeWithActivity(pid, processActivitySampleInterval)
-	if len(procs) == 0 {
-		procs = ListProcessGroup(pid)
-	}
-	summary := summarizeProcesses(pid, run.RunDir, procs)
+	procs, processSource, activitySampled := collectProcesses(pid, processActivitySampleInterval)
+	summary := summarizeProcesses(pid, run.RunDir, procs, processSource, activitySampled)
 	jsonResponse(w, map[string]any{
-		"processes":    procs,
-		"total_rss_kb": summary.TotalRSSKB,
-		"count":        len(procs),
-		"summary":      summary,
+		"processes":        procs,
+		"total_rss_kb":     summary.TotalRSSKB,
+		"count":            len(procs),
+		"process_source":   summary.ProcessSource,
+		"activity_sampled": summary.ActivitySampled,
+		"summary":          summary,
 	})
 }
 
@@ -724,15 +746,19 @@ func isActiveProcessState(state string) bool {
 	}
 }
 
-func readLastLogUpdate(runDir string) (string, string) {
+func readLastLogUpdate(runDir string) (string, string, string) {
 	paths := []string{
 		filepath.Join(runDir, "stdout.o"),
 		filepath.Join(runDir, "stderr.er"),
 	}
 	var latest time.Time
+	sawUnreadable := false
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				sawUnreadable = true
+			}
 			continue
 		}
 		if info.ModTime().After(latest) {
@@ -740,9 +766,12 @@ func readLastLogUpdate(runDir string) (string, string) {
 		}
 	}
 	if latest.IsZero() {
-		return "", ""
+		if sawUnreadable {
+			return "", "", "unreadable"
+		}
+		return "", "", "missing"
 	}
-	return latest.UTC().Format(time.RFC3339), humanizeAgo(time.Since(latest))
+	return latest.UTC().Format(time.RFC3339), humanizeAgo(time.Since(latest)), "ok"
 }
 
 func humanizeAgo(d time.Duration) string {
@@ -761,7 +790,19 @@ func humanizeAgo(d time.Duration) string {
 	}
 }
 
-func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo) RunProcessSummary {
+func collectProcesses(rootPID int, interval time.Duration) ([]ProcessInfo, string, bool) {
+	procs := ListProcessTreeWithActivity(rootPID, interval)
+	if len(procs) > 0 {
+		return procs, "tree", true
+	}
+	procs = ListProcessGroup(rootPID)
+	if len(procs) > 0 {
+		return procs, "group", false
+	}
+	return []ProcessInfo{}, "empty", false
+}
+
+func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo, processSource string, activitySampled bool) RunProcessSummary {
 	totalRSS := int64(0)
 	activeCount := 0
 	for _, p := range procs {
@@ -770,7 +811,7 @@ func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo) RunProc
 			activeCount++
 		}
 	}
-	lastLogUpdate, lastLogUpdateAgo := readLastLogUpdate(runDir)
+	lastLogUpdate, lastLogUpdateAgo, lastLogStatus := readLastLogUpdate(runDir)
 	return RunProcessSummary{
 		RootPID:          rootPID,
 		ProcessCount:     len(procs),
@@ -778,6 +819,9 @@ func summarizeProcesses(rootPID int, runDir string, procs []ProcessInfo) RunProc
 		TotalRSSKB:       totalRSS,
 		LastLogUpdate:    lastLogUpdate,
 		LastLogUpdateAgo: lastLogUpdateAgo,
+		LastLogStatus:    lastLogStatus,
+		ProcessSource:    processSource,
+		ActivitySampled:  activitySampled,
 	}
 }
 
@@ -786,11 +830,8 @@ func (s *WebServer) buildRunProcessSummary(run *internal.Run) RunProcessSummary 
 	if !ok || pid <= 0 {
 		return RunProcessSummary{}
 	}
-	procs := ListProcessTreeWithActivity(pid, processActivitySampleInterval)
-	if len(procs) == 0 {
-		procs = ListProcessGroup(pid)
-	}
-	return summarizeProcesses(pid, run.RunDir, procs)
+	procs, processSource, activitySampled := collectProcesses(pid, processActivitySampleInterval)
+	return summarizeProcesses(pid, run.RunDir, procs, processSource, activitySampled)
 }
 
 func (s *WebServer) readPID(runDir string) (int, bool) {
