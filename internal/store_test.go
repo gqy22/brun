@@ -57,6 +57,37 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 }
 
+func TestOpenStoreReadOnlyAllowsQueriesOnly(t *testing.T) {
+	dbPath := filepath.Join(fastTempDir(t), "path with spaces", "test #1.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	if err := s.CreateRun(&Run{ID: "ro-1", CWD: "/t", Command: "echo hi", Status: "success", StartedAt: ts(), RunDir: "/t"}); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	s.Close()
+
+	ro, err := OpenStoreReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStoreReadOnly() error = %v", err)
+	}
+	defer ro.Close()
+
+	runs, err := ro.ListRuns(10, "", "", "", "", "", "")
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != "ro-1" {
+		t.Fatalf("unexpected readonly query result: %+v", runs)
+	}
+
+	err = ro.CreateRun(&Run{ID: "ro-2", CWD: "/t", Command: "echo no", Status: "running", StartedAt: ts(), RunDir: "/t"})
+	if err == nil {
+		t.Fatal("CreateRun() on readonly store succeeded, want error")
+	}
+}
+
 func TestStore_UpdateRunStatus(t *testing.T) {
 	s := newTestStore(t)
 	defer s.Close()

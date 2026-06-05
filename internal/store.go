@@ -3,6 +3,7 @@ package internal
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -66,6 +67,23 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func OpenStoreReadOnly(path string) (*Store, error) {
+	values := url.Values{}
+	values.Set("mode", "ro")
+	values.Set("_query_only", "true")
+	values.Set("_busy_timeout", "5000")
+	uri := url.URL{Scheme: "file", Path: path, RawQuery: values.Encode()}
+	db, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

@@ -142,6 +142,17 @@ func openStore() (*internal.Store, error) {
 	return internal.NewStore(filepath.Join(internal.HomeDir(), "db.sqlite"))
 }
 
+func openStoreReadOnly() (*internal.Store, error) {
+	path := filepath.Join(internal.HomeDir(), "db.sqlite")
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return internal.NewStore(path)
+		}
+		return nil, err
+	}
+	return internal.OpenStoreReadOnly(path)
+}
+
 // --- init ---
 
 func initCmd() *cobra.Command {
@@ -552,7 +563,7 @@ func listCmd() *cobra.Command {
 		Use:   "list",
 		Short: "列出运行历史",
 		RunE: func(c *cobra.Command, args []string) error {
-			store, err := openStore()
+			store, err := openStoreReadOnly()
 			if err != nil {
 				return err
 			}
