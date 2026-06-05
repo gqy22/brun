@@ -171,11 +171,11 @@
 
 ### 20. Conda 环境信息缺失时静默降级
 
-- 类型：`silent-ignore`
-- 位置：`cmd/root.go:133`
-- 当前行为：没有 `CONDA_DEFAULT_ENV` 返回空；Python 版本或 conda history 读取失败也静默跳过。
-- 影响：脚本模板中的环境信息可能为空或不完整。
-- 建议：对 init 模板生成来说可以接受，但应把空值渲染成明确文本，例如 `not detected`。
+- 类型：`partial-resolved`
+- 位置：`cmd/root.go`, `internal/cli/run.go`, `internal/store.go`
+- 当前行为：`brun run` 会采集当前 Conda 状态并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail。字段包括 `conda_status=ok|partial|not_detected`、`conda_env`、`conda_prefix`、`python_version`。
+- 影响：run 审计中不再只能看到空值；智能体可以区分没有激活 Conda、检测到部分信息和完整检测成功。
+- 建议：保持 run 审计优先。`brun init` 仍只使用简短字符串注释，不为低频模板命令增加复杂状态。
 
 ### 21. 非 Linux 资源采样空实现
 
@@ -333,7 +333,7 @@
 
 1. 继续处理会造成行为漂移的 fallback：Web 默认监听地址是否继续保留局域网默认，或增加更明确的安全提示。
 2. 把剩余高频失败迁入结构化错误：数据库损坏/缺失、日志文件不可读。
-3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、Git 信息采集、Conda 信息采集、HomeDir 默认值。
+3. 再处理合理但需要显式化的 fallback：非 Linux 资源采样、Git 信息采集、hostname/username 采集、HomeDir 默认值。
 4. 最后评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
 
 ## 下一轮优化方向
@@ -343,7 +343,7 @@
 1. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
 2. 剩余错误结构化：数据库损坏/缺失提示 `repair`，日志不可读提示 run 状态和 run_dir。
 3. 资源能力显式化：非 Linux 时返回 `resource_supported=false`，不要把“不支持”显示成 0。
-4. Git/Conda/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
+4. Git/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
 
 ## 保留候选
 

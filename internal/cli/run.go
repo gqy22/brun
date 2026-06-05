@@ -178,6 +178,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 4. 收集 Git 信息
 	gitInfo := internal.CollectGitInfo(cwd)
+	condaInfo := cmd.DetectCondaInfo()
 
 	// 5. 构建命令字符串
 	commandStr := strings.Join(args, " ")
@@ -236,6 +237,10 @@ func executeRun(args []string, name, project, note string, tags []string,
 		GitBranch:     gitInfo.Branch,
 		GitCommit:     gitInfo.Commit,
 		GitDirty:      gitInfo.Dirty,
+		CondaStatus:   condaInfo.Status,
+		CondaEnv:      condaInfo.Env,
+		CondaPrefix:   condaInfo.Prefix,
+		PythonVersion: condaInfo.PythonVersion,
 		CWDSource:     cwdSource,
 		ProjectSource: projectSource,
 	}

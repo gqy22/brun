@@ -38,6 +38,10 @@ func TestStore_CreateRun(t *testing.T) {
 		RunDir:        "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
 		Hostname:      "devbox",
 		Username:      "user",
+		CondaStatus:   "ok",
+		CondaEnv:      "rnaseq",
+		CondaPrefix:   "/opt/conda/envs/rnaseq",
+		PythonVersion: "Python 3.11.8",
 		CWDSource:     "explicit",
 		ProjectSource: "config",
 	}
@@ -59,6 +63,9 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if got.CWDSource != "explicit" || got.ProjectSource != "config" {
 		t.Errorf("sources = %q/%q, want explicit/config", got.CWDSource, got.ProjectSource)
+	}
+	if got.CondaStatus != "ok" || got.CondaEnv != "rnaseq" || got.PythonVersion != "Python 3.11.8" {
+		t.Errorf("conda = %+v, want ok/rnaseq/Python 3.11.8", got)
 	}
 }
 

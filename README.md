@@ -59,6 +59,9 @@ make build
 
 ```bash
 # 1. 运行命令，默认后台执行
+brun -- bwa mem -t 16 ref.fa reads.fq.gz
+
+# 需要名称、项目、标签等元数据时使用规范入口
 brun run -n align-S1 -p wgs -t sample:S1 -- bwa mem -t 16 ref.fa reads.fq.gz
 
 # 2. 查看历史记录
@@ -240,6 +243,7 @@ http://192.168.1.x:9213
 
 | 命令 | 说明 | 常用示例 |
 |------|------|----------|
+| `brun -- <cmd>` | 快捷运行并完整记录（默认后台） | `brun -- cmd` |
 | `brun run -- <cmd>` | 执行并完整记录（默认后台） | `brun run -n job1 -p proj -t tagA -- cmd` |
 | `brun run -f -- <cmd>` | 前台运行 | `brun run -f -n job1 -- cmd` |
 | `brun list` | 列出运行历史 | `brun list -p proj -s "bwa" --since 1d` |
@@ -253,7 +257,7 @@ http://192.168.1.x:9213
 | `brun rerun <id>` | 重新运行 | `brun rerun --latest --dry-run` |
 | `brun web` | 启动 Web Dashboard | `brun web --port 8080` |
 | `brun init` | 生成 brun.yaml | `brun init my-proj` |
-| `brun clean` | 清理旧记录 | `brun clean --dry-run` |
+| `brun clean` | 清理旧记录（默认预览） | `brun clean --older-than 30d --write` |
 
 ## brun run 参数
 
@@ -322,6 +326,7 @@ brun list --json
 brun show --latest --json
 brun outputs --latest --json
 brun diag --latest --json
+brun clean --older-than 30d --json
 ```
 
 可恢复错误会尽量输出稳定的 `Code` 和下一步 `Hint`：

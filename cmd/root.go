@@ -129,11 +129,18 @@ func NextScriptName(dir, name string) (string, int) {
 	return fmt.Sprintf("%02d_%s.sh", maxNum+1, name), maxNum + 1
 }
 
-// DetectCondaEnv 检测当前 conda 环境
-func DetectCondaEnv() (envStr string) {
+type CondaInfo struct {
+	Status        string
+	Env           string
+	Prefix        string
+	PythonVersion string
+}
+
+// DetectCondaInfo 检测当前 conda 环境，用于 run 审计元数据。
+func DetectCondaInfo() CondaInfo {
 	env := os.Getenv("CONDA_DEFAULT_ENV")
 	if env == "" {
-		return ""
+		return CondaInfo{Status: "not_detected"}
 	}
 	prefix := os.Getenv("CONDA_PREFIX")
 
@@ -142,11 +149,30 @@ func DetectCondaEnv() (envStr string) {
 	if out, err := exec.Command("python3", "--version").Output(); err == nil {
 		pythonVer = strings.TrimSpace(string(out))
 	}
+	status := "ok"
+	if prefix == "" || pythonVer == "" {
+		status = "partial"
+	}
+
+	return CondaInfo{
+		Status:        status,
+		Env:           env,
+		Prefix:        prefix,
+		PythonVersion: pythonVer,
+	}
+}
+
+// DetectCondaEnv 检测当前 conda 环境
+func DetectCondaEnv() (envStr string) {
+	info := DetectCondaInfo()
+	if info.Status == "not_detected" {
+		return ""
+	}
 
 	// 尝试获取关键包版本（快速，<200ms）
 	packages := ""
-	if prefix != "" {
-		listPath := filepath.Join(prefix, "conda-meta/history")
+	if info.Prefix != "" {
+		listPath := filepath.Join(info.Prefix, "conda-meta/history")
 		if data, err := os.ReadFile(listPath); err == nil {
 			// 从 history 提取最近安装的几个关键包
 			lines := strings.Split(string(data), "\n")
@@ -168,9 +194,9 @@ func DetectCondaEnv() (envStr string) {
 		}
 	}
 
-	result := env
-	if pythonVer != "" {
-		result += fmt.Sprintf(" (%s)", pythonVer)
+	result := info.Env
+	if info.PythonVersion != "" {
+		result += fmt.Sprintf(" (%s)", info.PythonVersion)
 	}
 	if packages != "" {
 		result += fmt.Sprintf(" [%s]", packages)
@@ -179,10 +205,10 @@ func DetectCondaEnv() (envStr string) {
 }
 
 type CleanItem struct {
-	RunID  string
-	Age    string
-	Size   string
-	Reason string
+	RunID  string `json:"run_id"`
+	Age    string `json:"age"`
+	Size   string `json:"size"`
+	Reason string `json:"reason"`
 }
 
 func GenerateInitYAML(project string) string {
@@ -275,6 +301,18 @@ func BuildMetadataYAML(run *internal.Run) string {
 	}
 	if run.GitDirty {
 		b.WriteString("git_dirty: true\n")
+	}
+	if run.CondaStatus != "" {
+		fmt.Fprintf(&b, "conda_status: %s\n", run.CondaStatus)
+	}
+	if run.CondaEnv != "" {
+		fmt.Fprintf(&b, "conda_env: %s\n", run.CondaEnv)
+	}
+	if run.CondaPrefix != "" {
+		fmt.Fprintf(&b, "conda_prefix: %s\n", run.CondaPrefix)
+	}
+	if run.PythonVersion != "" {
+		fmt.Fprintf(&b, "python_version: %s\n", run.PythonVersion)
 	}
 	if run.DiagInfoCount > 0 {
 		fmt.Fprintf(&b, "diag_info_count: %d\n", run.DiagInfoCount)

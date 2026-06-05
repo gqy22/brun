@@ -68,26 +68,42 @@ web/
 - [x] `go run ./cmd/brun --help`、`go run ./cmd/brun run --help`、`go run ./cmd/brun web --help` 行为保持一致。
 - [x] 后续调度功能可以在新的执行编排层中新增，不需要继续扩大入口层。
 
-### 下一步方向
+### 当前阶段
 
 短期不急着拆 `internal/store.go`、`internal/capture.go`、`internal/git.go` 和 `internal/logger.go`。这些文件职责单一、体量较小，继续拆成子包会带来较多 import churn，但收益有限。
 
-当前架构已经够用一段时间。下一轮优先级不应继续做结构拆分，而应转向 `docs/fallbacks.md` 中的行为清理，先减少会造成数据丢失、用户无感或行为漂移的 fallback。
+当前架构已经够用一段时间。下一轮优先级不应继续做结构拆分，也不应急着进入调度系统；当前更值得做的是命令体验规范化、agent native 输出稳定化，以及 `docs/fallbacks.md` 中剩余行为的显式化。
 
 运行诊断已经落地：`brun run` 会把推断行为和关键写入失败记录到 run 目录下的 `diagnostics.jsonl`，并在前台运行结束时输出 warning 摘要。诊断摘要已经写入 SQLite，`brun list`、`brun show` 和 Web 列表可以直接展示 warning/error 状态；`brun diag` 用于查看完整诊断事件。
 
 SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.o`、`stderr.er`、`metadata.yaml` 和 `diagnostics.jsonl` 是主审计载体。默认 `BRUN_SQLITE_SYNC=off` 用于避免短任务被 SQLite 同步拖慢；需要更强写入一致性时可以设置 `BRUN_SQLITE_SYNC=normal` 或 `BRUN_SQLITE_SYNC=full`。如果索引缺失或损坏，使用 `brun repair --write` 从 run 目录重建缺失的 run 记录。
 
-建议优先级：
+当前命令体系已经形成 5 组稳定入口：
+
+1. 运行入口：`brun run -- <command>`。
+2. 查询入口：`brun list`、`brun show`、`brun logs`、`brun outputs`、`brun script`、`brun diag`。
+3. 标注和复用：`brun tag`、`brun note`、`brun rerun`。
+4. 维护入口：`brun repair`、`brun clean`。
+5. 工具界面和模板：`brun web`、`brun init`。
+
+已完成：
+
+1. 命令体验规范化：已支持 `brun -- <command>` 作为 `brun run -- <command>` 的快捷入口；只运行 `brun` 继续显示帮助，不默认执行任何动作；误写成 `brun sh -c ...` 这类缺少 `--` 的形式会返回 `missing_command_separator`。
+2. JSON 和错误契约补齐：`brun list/show/outputs/diag/clean` 均支持 JSON；常见可恢复错误输出稳定 `Code` 和 `Hint`。
+3. `brun clean` 已从占位命令改为可执行维护命令：必须提供 `--older-than`，默认只预览，只有 `--write` 才删除匹配 run 记录和 run 目录；支持 `--json`、`--keep-failed`、`--keep-tag`。
+
+近期建议优先级：
 
 1. 资源能力显式化：非 Linux 时返回能力状态，而不是让 UI 把“不支持”看成 0。
-2. Git/Conda/hostname/username 采集状态显式化。
+2. Git/hostname/username 采集状态显式化。Git 暂不作为当前优先项，hostname/username 可先做轻量状态字段。
 3. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
 4. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
 
 已完成：Web 启动语义已收紧，显式 `--port` 被占用时会直接失败；未显式指定端口时才保留自动寻找后续端口。Web processes/logs API 已返回 `process_source`、`activity_sampled`、`last_log_status` 和 logs `status`，避免把降级状态伪装成空值。
 
-## 任务调度与依赖运行
+已完成：Conda 状态已进入 run 审计链路。`brun run` 会记录 `conda_status=ok|partial|not_detected`、`conda_env`、`conda_prefix` 和 `python_version`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail。
+
+## 中长期：任务调度与依赖运行
 
 ### 背景
 

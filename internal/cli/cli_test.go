@@ -179,6 +179,10 @@ func TestShowCmdJSONOutput(t *testing.T) {
 		Status:        "success",
 		StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		RunDir:        filepath.Join(home, "runs", "x"),
+		CondaStatus:   "ok",
+		CondaEnv:      "rnaseq",
+		CondaPrefix:   "/opt/conda/envs/rnaseq",
+		PythonVersion: "Python 3.11.8",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -196,12 +200,18 @@ func TestShowCmdJSONOutput(t *testing.T) {
 		ID            string `json:"id"`
 		ProjectSource string `json:"project_source"`
 		CWDSource     string `json:"cwd_source"`
+		CondaStatus   string `json:"conda_status"`
+		CondaEnv      string `json:"conda_env"`
+		PythonVersion string `json:"python_version"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
 		t.Fatalf("json decode: %v\n%s", err, out.String())
 	}
 	if resp.ID != runID || resp.ProjectSource != "explicit" || resp.CWDSource != "explicit" {
 		t.Fatalf("unexpected show json: %+v", resp)
+	}
+	if resp.CondaStatus != "ok" || resp.CondaEnv != "rnaseq" || resp.PythonVersion != "Python 3.11.8" {
+		t.Fatalf("unexpected conda json: %+v", resp)
 	}
 }
 
@@ -210,6 +220,14 @@ func TestFormatCLIErrorIncludesCodeAndHint(t *testing.T) {
 	out := formatCLIError(err)
 	if !strings.Contains(out, "Code: invalid_time_filter") || !strings.Contains(out, "Hint: 使用 today") {
 		t.Fatalf("formatted error missing code/hint: %s", out)
+	}
+}
+
+func TestRootCommandRequiresDashDashForShortcutRun(t *testing.T) {
+	err := cliError("missing_command_separator", "未知命令或缺少 -- 分隔符", "运行命令请使用 brun -- <command>", nil)
+	out := formatCLIError(err)
+	if !strings.Contains(out, "Code: missing_command_separator") {
+		t.Fatalf("formatted error missing shortcut code: %s", out)
 	}
 }
 
@@ -314,7 +332,7 @@ func TestExecuteRunUsesProvidedRunID(t *testing.T) {
 func TestReadRunMetadata(t *testing.T) {
 	runDir := fastTempDir(t)
 	path := filepath.Join(runDir, "metadata.yaml")
-	data := []byte("id: r1\nproject: p\ncommand: echo hi\nstatus: success\nexit_code: 0\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\nended_at: 2026-06-05T01:00:01Z\nduration_ms: 1000\n")
+	data := []byte("id: r1\nproject: p\ncommand: echo hi\nstatus: success\nexit_code: 0\ncwd: /tmp\nstarted_at: 2026-06-05T01:00:00Z\nended_at: 2026-06-05T01:00:01Z\nduration_ms: 1000\nconda_status: ok\nconda_env: rnaseq\nconda_prefix: /opt/conda/envs/rnaseq\npython_version: Python 3.11.8\n")
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +343,9 @@ func TestReadRunMetadata(t *testing.T) {
 	}
 	if run.ID != "r1" || run.Project != "p" || run.Command != "echo hi" || run.DurationMs != 1000 {
 		t.Fatalf("unexpected run metadata: %+v", run)
+	}
+	if run.CondaStatus != "ok" || run.CondaEnv != "rnaseq" || run.PythonVersion != "Python 3.11.8" {
+		t.Fatalf("unexpected conda metadata: %+v", run)
 	}
 }
 
@@ -344,6 +365,110 @@ func TestLoadRunsFromMetadata(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ID != "r1" || runs[0].RunDir != runDir {
 		t.Fatalf("runs = %+v, want r1 with runDir", runs)
+	}
+}
+
+func TestCleanCmdDryRunJSONDoesNotDelete(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	runDir := filepath.Join(home, "runs", "old-run")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "stdout.o"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	if err := store.CreateRun(&internal.Run{
+		ID:        "old-run",
+		CWD:       "/tmp",
+		Command:   "echo hi",
+		Status:    "success",
+		StartedAt: startedAt,
+		RunDir:    runDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	c := cleanCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetErr(&out)
+	c.SetArgs([]string{"--older-than", "1d", "--json"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("cleanCmd() error = %v", err)
+	}
+	var resp struct {
+		Write bool `json:"write"`
+		Count int  `json:"count"`
+		Runs  []struct {
+			RunID string `json:"run_id"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("json decode: %v\n%s", err, out.String())
+	}
+	if resp.Write || resp.Count != 1 || len(resp.Runs) != 1 || resp.Runs[0].RunID != "old-run" {
+		t.Fatalf("unexpected clean json: %+v", resp)
+	}
+	if _, err := os.Stat(runDir); err != nil {
+		t.Fatalf("dry-run removed run dir: %v", err)
+	}
+}
+
+func TestCleanCmdWriteDeletesMatchedRun(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	runDir := filepath.Join(home, "runs", "old-run")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "stdout.o"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	if err := store.CreateRun(&internal.Run{
+		ID:        "old-run",
+		CWD:       "/tmp",
+		Command:   "echo hi",
+		Status:    "success",
+		StartedAt: startedAt,
+		RunDir:    runDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	c := cleanCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetErr(&out)
+	c.SetArgs([]string{"--older-than", "1d", "--write"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("cleanCmd() error = %v", err)
+	}
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Fatalf("run dir still exists after clean --write: %v", err)
+	}
+
+	store, err = openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.GetRun("old-run"); err == nil {
+		t.Fatal("run still exists after clean --write")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/biotools/brun/internal"
 	"github.com/spf13/cobra"
@@ -55,12 +56,28 @@ func Execute(opts Options) error {
 		Short: "bio-runner: 面向生物信息学的运行记录与日志管理工具",
 		Long: `brun 是一个跨项目运行记录工具。
 通过 brun run -- <command> 包装任意命令，自动记录日志、环境、Git 信息和输出文件。
+也可以使用 brun -- <command> 作为快捷入口，等价于默认后台运行。
 
 默认数据目录为 ~/.brun，可通过 BRUN_HOME 覆盖。
 查询最新 run 使用显式 --latest；位置参数始终按真实 run_id 处理。`,
 		Version:       opts.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args: func(c *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			if c.ArgsLenAtDash() < 0 {
+				return cliError("missing_command_separator", "未知命令或缺少 -- 分隔符", "运行命令请使用 brun -- <command>；查看帮助使用 brun --help", nil)
+			}
+			return nil
+		},
+		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return c.Help()
+			}
+			return detachRun(c, args, "", "", "", nil, false, "", 0, "")
+		},
 	}
 	rootCmd.SetHelpTemplate(helpTemplate)
 	rootCmd.SetUsageTemplate(usageTemplate)
@@ -124,10 +141,38 @@ func Execute(opts Options) error {
 	rootCmd.PersistentFlags().BoolP("version", "v", false, "显示版本号")
 
 	if err := rootCmd.Execute(); err != nil {
+		if isRootShortcutFlagError(rootCmd, err, os.Args[1:]) {
+			err = cliError("missing_command_separator", "未知命令或缺少 -- 分隔符", "运行命令请使用 brun -- <command>；查看帮助使用 brun --help", err)
+		}
 		fmt.Fprint(os.Stderr, formatCLIError(err))
 		return err
 	}
 	return nil
+}
+
+func isRootShortcutFlagError(rootCmd *cobra.Command, err error, args []string) bool {
+	if err == nil || len(args) == 0 {
+		return false
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "unknown shorthand flag") && !strings.Contains(msg, "unknown flag") {
+		return false
+	}
+	first := args[0]
+	if strings.HasPrefix(first, "-") {
+		return false
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+	}
+	for _, sub := range rootCmd.Commands() {
+		if sub.Name() == first || sub.HasAlias(first) {
+			return false
+		}
+	}
+	return true
 }
 
 func openStore() (*internal.Store, error) {

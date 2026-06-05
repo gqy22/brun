@@ -171,6 +171,10 @@ type runJSONPayload struct {
 	GitBranch         string                     `json:"git_branch,omitempty"`
 	GitCommit         string                     `json:"git_commit,omitempty"`
 	GitDirty          bool                       `json:"git_dirty"`
+	CondaStatus       string                     `json:"conda_status,omitempty"`
+	CondaEnv          string                     `json:"conda_env,omitempty"`
+	CondaPrefix       string                     `json:"conda_prefix,omitempty"`
+	PythonVersion     string                     `json:"python_version,omitempty"`
 	PeakRSSKB         int64                      `json:"peak_rss_kb"`
 	CPUTimeMs         int64                      `json:"cpu_time_ms"`
 	Tags              []string                   `json:"tags,omitempty"`
@@ -199,6 +203,10 @@ func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
 		GitBranch:         r.GitBranch,
 		GitCommit:         r.GitCommit,
 		GitDirty:          r.GitDirty,
+		CondaStatus:       r.CondaStatus,
+		CondaEnv:          r.CondaEnv,
+		CondaPrefix:       r.CondaPrefix,
+		PythonVersion:     r.PythonVersion,
 		PeakRSSKB:         r.PeakRSSKB,
 		CPUTimeMs:         r.CPUTimeMs,
 		Tags:              tags,

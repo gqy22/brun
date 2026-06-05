@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,16 +173,27 @@ func rerunCmd() *cobra.Command {
 
 func cleanCmd() *cobra.Command {
 	var olderThan string
-	var compressLogs bool
-	var truncateSize string
 	var keepFailed bool
 	var keepTag string
-	var dryRun bool
+	var write bool
+	var jsonOut bool
 
 	c := &cobra.Command{
-		Use:   "clean [options]",
+		Use:   "clean --older-than <duration>",
 		Short: "清理旧运行记录",
+		Long:  "清理符合条件的 run 记录和 run 目录。默认只预览，必须显式使用 --write 才会删除。",
+		Example: `  brun clean --older-than 30d
+  brun clean --older-than 30d --keep-failed --json
+  brun clean --older-than 90d --write`,
 		RunE: func(c *cobra.Command, args []string) error {
+			if olderThan == "" {
+				return cliError("missing_clean_filter", "缺少清理条件 --older-than", "例如 brun clean --older-than 30d；默认只预览，实际删除需加 --write", nil)
+			}
+			maxAge, err := parseCleanDuration(olderThan)
+			if err != nil {
+				return cliError("invalid_clean_duration", "--older-than 无效: "+err.Error(), "支持 Nh、Nd、Nw 或 Go duration，例如 12h、30d、4w", err)
+			}
+
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -192,26 +205,66 @@ func cleanCmd() *cobra.Command {
 				return err
 			}
 
-			var items []cmd.CleanItem
+			items := make([]cmd.CleanItem, 0)
 			for _, r := range runs {
+				if r.Status == "running" {
+					continue
+				}
+				if keepFailed && r.Status == "failed" {
+					continue
+				}
+				if keepTag != "" {
+					tags, err := store.GetTags(r.ID)
+					if err != nil {
+						return err
+					}
+					if containsString(tags, keepTag) {
+						continue
+					}
+				}
+				age, oldEnough, err := runAge(r.StartedAt, maxAge)
+				if err != nil || !oldEnough {
+					continue
+				}
 				items = append(items, cmd.CleanItem{
 					RunID:  r.ID,
-					Age:    ageSince(r.StartedAt),
-					Size:   "?",
-					Reason: "old",
+					Age:    age,
+					Size:   formatDirSize(r.RunDir),
+					Reason: "older_than=" + olderThan,
 				})
 			}
 
-			fmt.Print(cmd.FormatCleanSummary(items, dryRun))
+			if jsonOut {
+				payload := map[string]any{
+					"write":       write,
+					"older_than":  olderThan,
+					"keep_failed": keepFailed,
+					"keep_tag":    keepTag,
+					"count":       len(items),
+					"runs":        items,
+				}
+				if err := json.NewEncoder(c.OutOrStdout()).Encode(payload); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprint(c.OutOrStdout(), cmd.FormatCleanSummary(items, !write))
+			}
+			if !write {
+				return nil
+			}
+			for _, item := range items {
+				if err := store.DeleteRun(item.RunID); err != nil {
+					return cliError("clean_delete_failed", "删除 run 失败: "+err.Error(), "检查 run 目录权限和 SQLite 状态；可重新运行 brun clean --older-than "+olderThan, err)
+				}
+			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&olderThan, "older-than", "", "清理早于此时长的 run")
-	c.Flags().BoolVar(&compressLogs, "compress-logs", false, "压缩日志")
-	c.Flags().StringVar(&truncateSize, "truncate-large-logs", "", "裁剪超大日志")
 	c.Flags().BoolVar(&keepFailed, "keep-failed", false, "保留失败 run")
 	c.Flags().StringVar(&keepTag, "keep-tag", "", "保留指定 tag 的 run")
-	c.Flags().BoolVar(&dryRun, "dry-run", false, "只显示将执行的操作")
+	c.Flags().BoolVar(&write, "write", false, "实际删除匹配的 run；不传时只预览")
+	c.Flags().BoolVar(&jsonOut, "json", false, "输出 JSON")
 	return c
 }
 
@@ -292,6 +345,10 @@ type runMetadata struct {
 	DurationMs       int64  `yaml:"duration_ms"`
 	GitCommit        string `yaml:"git_commit"`
 	GitDirty         bool   `yaml:"git_dirty"`
+	CondaStatus      string `yaml:"conda_status"`
+	CondaEnv         string `yaml:"conda_env"`
+	CondaPrefix      string `yaml:"conda_prefix"`
+	PythonVersion    string `yaml:"python_version"`
 	CWDSource        string `yaml:"cwd_source"`
 	ProjectSource    string `yaml:"project_source"`
 	DiagInfoCount    int    `yaml:"diag_info_count"`
@@ -326,6 +383,10 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		DurationMs:       meta.DurationMs,
 		GitCommit:        meta.GitCommit,
 		GitDirty:         meta.GitDirty,
+		CondaStatus:      meta.CondaStatus,
+		CondaEnv:         meta.CondaEnv,
+		CondaPrefix:      meta.CondaPrefix,
+		PythonVersion:    meta.PythonVersion,
 		CWDSource:        meta.CWDSource,
 		ProjectSource:    meta.ProjectSource,
 		DiagInfoCount:    meta.DiagInfoCount,
@@ -399,4 +460,86 @@ func ageSince(startedAt string) string {
 	default:
 		return fmt.Sprintf("%.0fd", d.Hours()/24)
 	}
+}
+
+func parseCleanDuration(input string) (time.Duration, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+	unit := input[len(input)-1]
+	if unit == 'd' || unit == 'w' {
+		n, err := strconv.Atoi(input[:len(input)-1])
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("expected positive duration, got %q", input)
+		}
+		if unit == 'w' {
+			n *= 7
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(input)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("expected positive duration, got %q", input)
+	}
+	return d, nil
+}
+
+func runAge(startedAt string, maxAge time.Duration) (string, bool, error) {
+	t, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return "?", false, err
+	}
+	age := time.Since(t)
+	if age < 0 {
+		age = 0
+	}
+	return humanCleanAge(age), age >= maxAge, nil
+}
+
+func humanCleanAge(d time.Duration) string {
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+func formatDirSize(path string) string {
+	size, err := dirSize(path)
+	if err != nil {
+		return "?"
+	}
+	return cmd.FormatSize(size)
+}
+
+func dirSize(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

@@ -138,6 +138,37 @@ func TestApiGetRun_ReturnsDiagnostics(t *testing.T) {
 	}
 }
 
+func TestApiGetRun_ReturnsCondaMetadata(t *testing.T) {
+	srv, runID := newTestServer(t)
+	run, err := srv.store.GetRun(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.DeleteRun(runID); err != nil {
+		t.Fatal(err)
+	}
+	run.CondaStatus = "ok"
+	run.CondaEnv = "rnaseq"
+	run.CondaPrefix = "/opt/conda/envs/rnaseq"
+	run.PythonVersion = "Python 3.11.8"
+	if err := srv.store.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+
+	w := srv.doReq("GET", "/api/runs/"+runID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["conda_status"] != "ok" || resp["conda_env"] != "rnaseq" || resp["python_version"] != "Python 3.11.8" {
+		t.Fatalf("unexpected conda metadata: %+v", resp)
+	}
+}
+
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body
 func (ts *testSrv) fetchSSE(t *testing.T, urlPath string, timeout time.Duration) ([]byte, int) {
 	t.Helper()
