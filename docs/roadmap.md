@@ -1,10 +1,10 @@
 # Roadmap
 
-## 下一阶段架构目标
+## 已完成的架构治理
 
 ### 背景
 
-当前项目已经有 `cmd/`、`internal/` 和 `web/` 目录，但根目录 `main.go` 仍然承担了过多职责：
+项目早期已经有 `cmd/`、`internal/` 和 `web/` 目录，但根目录 `main.go` 曾经承担了过多职责：
 
 - 程序入口。
 - Cobra root command 和子命令装配。
@@ -12,11 +12,11 @@
 - 运行编排、查询、日志输出和 Web 启动逻辑。
 - `web/templates` 与 `web/static` 的资源嵌入。
 
-随着后续要加入任务调度、依赖运行、daemon 和更完整的 Web 操作，继续把核心 CLI 编排放在根目录 `main.go` 会让入口层越来越难维护。下一阶段应先完成项目结构治理，让入口、命令层、业务执行层和资源层边界清楚。
+随着后续要加入任务调度、依赖运行、daemon 和更完整的 Web 操作，继续把核心 CLI 编排放在根目录会让入口层越来越难维护。因此已先完成第一阶段项目结构治理，让入口、命令层和 Web 资源边界更清楚。
 
-### 推荐目录结构
+### 当前目录结构
 
-长期目标建议调整为：
+当前已调整为：
 
 ```text
 cmd/
@@ -25,22 +25,13 @@ cmd/
 internal/
   cli/
     root.go
-    init.go
     run.go
     query.go
-    web.go
-  runner/
-    run.go
-    submit.go
-    scheduler.go
-  store/
-    store.go
-  capture/
-    capture.go
-  git/
-    git.go
-  logging/
-    logger.go
+    manage.go
+  capture.go
+  git.go
+  logger.go
+  store.go
 web/
   embed.go
   templates/
@@ -51,60 +42,48 @@ web/
 
 - `cmd/brun/main.go`：只做程序入口，读取 build-time version 信息，调用 `cli.Execute(...)`。
 - `internal/cli`：负责 Cobra 命令定义、参数解析、帮助模板和命令间的用户交互输出。
-- `internal/runner`：负责 run/submit/start/daemon 的核心执行与调度编排。
-- `internal/store`：负责数据库模型、迁移和持久化操作。
-- `internal/capture`：负责配置解析、文件快照和 artifact 分类。
-- `internal/git`：负责项目识别、Git 信息采集和 run id/path 生成。
-- `internal/logging`：负责日志初始化和全局 logger。
+- `internal/store.go`：负责数据库模型、迁移和持久化操作。
+- `internal/capture.go`：负责配置解析、文件快照和 artifact 分类。
+- `internal/git.go`：负责项目识别、Git 信息采集和 run id/path 生成。
+- `internal/logger.go`：负责日志初始化和全局 logger。
 - `web/embed.go`：集中处理 `go:embed`，避免 `cmd/brun/main.go` 需要跨目录嵌入资源。
 
-### 迁移原则
+### 已完成事项
 
-第一步不要重写业务逻辑，只做低风险搬迁：
+第一阶段已经完成以下低风险搬迁：
 
-1. 新增 `web` package，把模板和静态资源嵌入从根目录 `main.go` 移走。
+1. 新增 `web` package，把模板和静态资源嵌入从根目录入口移走。
 2. 新增 `internal/cli`，把 Cobra root command、help/usage 模板和各个命令函数迁入。
-3. 将根目录 `main.go` 移到 `cmd/brun/main.go`，保持入口层薄：
-
-```go
-package main
-
-import (
-	"os"
-
-	"github.com/biotools/brun/internal/cli"
-	"github.com/biotools/brun/web"
-)
-
-var version = "0.2.0"
-var commit string
-var buildDate string
-
-func main() {
-	if err := cli.Execute(cli.Options{
-		Version:   version,
-		Commit:    commit,
-		BuildDate: buildDate,
-		Templates: web.Templates,
-		Static:    web.Static,
-	}); err != nil {
-		os.Exit(1)
-	}
-}
-```
-
-4. 保持已有行为、命令名称、flag、输出格式和测试语义不变。
-5. 迁移完成后再拆 `runner`、`store`、`capture`、`git` 等更细包，避免一次性大改造成回归风险。
+3. 将根目录 `main.go` 移到 `cmd/brun/main.go`，保持入口层薄。
+4. 将 `internal/cli` 按职责拆为 `root.go`、`run.go`、`query.go` 和 `manage.go`。
+5. 保持已有行为、命令名称、flag、输出格式和测试语义不变。
 
 ### 验收标准
 
-- 根目录不再有 `main.go`。
-- `cmd/brun/main.go` 少于 50 行，只负责入口和 build-time 变量。
-- Cobra 命令定义集中在 `internal/cli`。
-- Web 资源嵌入集中在 `web/embed.go`。
-- `go test ./...` 通过。
-- `go run ./cmd/brun --help`、`go run ./cmd/brun run --help`、`go run ./cmd/brun web --help` 行为保持一致。
-- 后续调度功能可以在 `internal/runner` 中新增，不需要继续扩大入口层。
+- [x] 根目录不再有 `main.go`。
+- [x] `cmd/brun/main.go` 少于 50 行，只负责入口和 build-time 变量。
+- [x] Cobra 命令定义集中在 `internal/cli`。
+- [x] Web 资源嵌入集中在 `web/embed.go`。
+- [x] `go test ./...` 通过。
+- [x] `go run ./cmd/brun --help`、`go run ./cmd/brun run --help`、`go run ./cmd/brun web --help` 行为保持一致。
+- [x] 后续调度功能可以在新的执行编排层中新增，不需要继续扩大入口层。
+
+### 下一步方向
+
+短期不急着拆 `internal/store.go`、`internal/capture.go`、`internal/git.go` 和 `internal/logger.go`。这些文件职责单一、体量较小，继续拆成子包会带来较多 import churn，但收益有限。
+
+当前架构已经够用一段时间。下一轮优先级不应继续做结构拆分，而应转向 `docs/fallbacks.md` 中的行为清理，先减少会造成数据丢失、用户无感或行为漂移的 fallback。
+
+运行诊断已经开始落地：`brun run` 会把推断行为和关键写入失败记录到 run 目录下的 `diagnostics.jsonl`，并在前台运行结束时输出 warning 摘要。下一步重点不是继续拆包，而是把这些诊断接入 list/web，使用户不需要进入 run 目录也能看到“成功但有提示”的状态。
+
+建议优先级：
+
+1. 修复后台 detached run 的 RunID 不一致问题。
+2. 给 run 记录增加诊断摘要字段，例如 warning 数、最后诊断时间和关键 code。
+3. 在 `brun list` 和 Web run detail 中展示诊断状态。
+4. 逐步把关键审计文件、tag/note/artifact/resource/metadata 的写入失败从“仅提示”收紧为明确状态。
+5. 让 `brun.yaml` 和时间过滤解析错误显式报错。
+6. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
 
 ## 任务调度与依赖运行
 

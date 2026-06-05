@@ -11,6 +11,7 @@ import (
 )
 
 const maxRetries = 5
+const schemaVersion = 1
 
 var retryDelay = 50 * time.Millisecond
 
@@ -58,27 +59,25 @@ func NewStore(path string) (*Store, error) {
 	dir := dirOf(path)
 	os.MkdirAll(dir, 0755)
 
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", sqliteDSN(path, false))
 	if err != nil {
 		return nil, err
 	}
+	configureDB(db)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
 func OpenStoreReadOnly(path string) (*Store, error) {
-	values := url.Values{}
-	values.Set("mode", "ro")
-	values.Set("_query_only", "true")
-	values.Set("_busy_timeout", "5000")
-	uri := url.URL{Scheme: "file", Path: path, RawQuery: values.Encode()}
-	db, err := sql.Open("sqlite", uri.String())
+	db, err := sql.Open("sqlite", sqliteDSN(path, true))
 	if err != nil {
 		return nil, err
 	}
+	configureDB(db)
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, err
@@ -86,9 +85,35 @@ func OpenStoreReadOnly(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+func sqliteDSN(path string, readOnly bool) string {
+	values := url.Values{}
+	values.Add("_pragma", "busy_timeout(5000)")
+	if readOnly {
+		values.Set("mode", "ro")
+		values.Add("_pragma", "query_only(1)")
+	} else {
+		values.Add("_pragma", "synchronous(OFF)")
+	}
+	uri := url.URL{Scheme: "file", Path: path, RawQuery: values.Encode()}
+	return uri.String()
+}
+
+func configureDB(db *sql.DB) {
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate() error {
+	version, err := s.schemaVersion()
+	if err != nil {
+		return fmt.Errorf("schema version: %w", err)
+	}
+	if version >= schemaVersion {
+		return nil
+	}
+
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS runs (
 			id TEXT PRIMARY KEY,
@@ -131,13 +156,53 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN peak_rss_kb INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN cpu_time_ms INTEGER DEFAULT 0`,
 	}
+	var lastErr error
+	delay := retryDelay
+	for i := 0; i < maxRetries; i++ {
+		if err := s.migrateOnce(migrations); err == nil {
+			s.enableWriteAheadLog()
+			return nil
+		} else {
+			lastErr = err
+			if !isBusyError(err) {
+				return fmt.Errorf("migrate: %w", err)
+			}
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return fmt.Errorf("migrate: after %d retries: %w", maxRetries, lastErr)
+}
+
+func (s *Store) schemaVersion() (int, error) {
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+func (s *Store) migrateOnce(migrations []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for _, m := range migrations {
-		err := s.retryExec(m)
-		if err != nil && !isDuplicateColumn(err) {
-			return fmt.Errorf("migrate: %w", err)
+		if _, err := tx.Exec(m); err != nil && !isDuplicateColumn(err) {
+			return err
 		}
 	}
-	return nil
+	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) enableWriteAheadLog() {
+	if err := s.retryExec(`PRAGMA journal_mode=WAL`); err != nil {
+		Log().Warn("sqlite_wal_enable_failed", "error", err.Error())
+	}
 }
 
 // retryExec 带指数退避的重试执行，解决并发 SQLITE_BUSY

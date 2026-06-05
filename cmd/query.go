@@ -10,12 +10,13 @@ import (
 )
 
 type RunRow struct {
-	ID       string
-	Name     string
-	Project  string
-	Status   string
-	Duration string
-	Command  string
+	ID         string
+	Name       string
+	Project    string
+	Status     string
+	Diagnostic string
+	Duration   string
+	Command    string
 }
 
 type RunDetail struct {
@@ -36,6 +37,17 @@ type RunDetail struct {
 	GitDirty  bool
 	Tags      []string
 	Note      string
+	Diag      DiagnosticDetail
+}
+
+type DiagnosticDetail struct {
+	InfoCount    int
+	WarningCount int
+	ErrorCount   int
+	LastLevel    string
+	LastCode     string
+	LastMessage  string
+	LastAt       string
 }
 
 type ArtifactRow struct {
@@ -84,9 +96,9 @@ func FormatRunList(runs []RunRow) string {
 		return Gray("未找到运行记录。\n")
 	}
 	var b strings.Builder
-	b.WriteString(TableHeader("%-24s %-16s %-15s %-9s %-10s %s\n",
-		"RUN ID", "NAME", "PROJECT", "STATUS", "DURATION", "COMMAND"))
-	b.WriteString(Dim("----                     ----            -------         ------    --------   -------\n"))
+	b.WriteString(TableHeader("%-24s %-16s %-15s %-9s %-6s %-10s %s\n",
+		"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION", "COMMAND"))
+	b.WriteString(Dim("----                     ----            -------         ------    ----   --------   -------\n"))
 	for _, r := range runs {
 		name := r.Name
 		if len(name) > 12 {
@@ -96,11 +108,12 @@ func FormatRunList(runs []RunRow) string {
 		if len(cmd) > 32 {
 			cmd = cmd[:29] + "..."
 		}
-		fmt.Fprintf(&b, "%s %s %s %s %s %s\n",
+		fmt.Fprintf(&b, "%s %s %s %s %s %s %s\n",
 			PadRight(r.ID, 24),
 			PadRight(name, 16),
 			PadRight(r.Project, 15),
 			PadRight(StatusColor(r.Status), 9),
+			PadRight(r.Diagnostic, 6),
 			PadRight(r.Duration, 10),
 			Dim(cmd))
 	}
@@ -135,6 +148,16 @@ func FormatShow(r *RunDetail) string {
 		}
 	}
 	fmt.Fprintf(&b, "%s  %d\n", Bold("Exit Code:"), r.ExitCode)
+	if r.Diag.WarningCount > 0 || r.Diag.ErrorCount > 0 {
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Diagnostics:"), formatDiagCounts(r.Diag))
+		if r.Diag.LastMessage != "" {
+			fmt.Fprintf(&b, "%s  %s", Bold("Last Diagnostic:"), r.Diag.LastMessage)
+			if r.Diag.LastCode != "" {
+				fmt.Fprintf(&b, " (%s)", r.Diag.LastCode)
+			}
+			b.WriteString("\n")
+		}
+	}
 	if r.GitRepo != "" {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Git Repo:"), Dim(r.GitRepo))
 	}
@@ -152,6 +175,20 @@ func FormatShow(r *RunDetail) string {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Note:"), r.Note)
 	}
 	return b.String()
+}
+
+func formatDiagCounts(d DiagnosticDetail) string {
+	parts := []string{}
+	if d.ErrorCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d error", d.ErrorCount))
+	}
+	if d.WarningCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d warning", d.WarningCount))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func min(a, b int) int {

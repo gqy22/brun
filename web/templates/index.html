@@ -77,7 +77,14 @@
                   </div>
                 </div>
               </td>
-              <td><span :class="'badge badge-'+r.status" x-text="r.status"></span></td>
+	              <td>
+	                <div class="status-with-diag">
+	                  <span :class="'badge badge-'+r.status" x-text="r.status"></span>
+	                  <template x-if="diagLabel(r)">
+	                    <span class="diag-pill" :title="diagTitle(r)" x-text="diagLabel(r)"></span>
+	                  </template>
+	                </div>
+	              </td>
               <td class="duration-cell" x-text="getDuration(r)"></td>
               <td>
                 <div class="cmd-cell cmd-cell-strong" :title="r.command" x-text="truncate(r.command, 96)"></div>
@@ -106,7 +113,12 @@
               <div class="run-card-title" x-text="r.name || truncate(r.command, 48)"></div>
               <span class="run-card-id" x-text="r.id"></span>
             </div>
-            <span :class="'badge badge-'+r.status" x-text="r.status"></span>
+	            <div class="status-with-diag">
+	              <span :class="'badge badge-'+r.status" x-text="r.status"></span>
+	              <template x-if="diagLabel(r)">
+	                <span class="diag-pill" :title="diagTitle(r)" x-text="diagLabel(r)"></span>
+	              </template>
+	            </div>
           </div>
           <div class="run-card-body">
             <template x-if="r.name">
@@ -228,16 +240,30 @@
           }
         },
 
-        getDuration(r) {
-          var started = this._runningTimers[r.id];
-          if (started && r.status === 'running') {
+	        getDuration(r) {
+	          var started = this._runningTimers[r.id];
+	          if (started && r.status === 'running') {
             var ms = Date.now() - new Date(started).getTime();
             return formatDuration(ms);
           }
-          return r.duration || '-';
-        },
+	          return r.duration || '-';
+	        },
 
-        async loadFooterStats() {
+	        diagLabel(r) {
+	          var d = r.diagnostic_summary || {};
+	          if ((d.error_count || 0) > 0) return 'E' + d.error_count;
+	          if ((d.warning_count || 0) > 0) return 'W' + d.warning_count;
+	          return '';
+	        },
+
+	        diagTitle(r) {
+	          var d = r.diagnostic_summary || {};
+	          if ((d.error_count || 0) > 0) return d.error_count + ' error diagnostics';
+	          if ((d.warning_count || 0) > 0) return d.warning_count + ' warning diagnostics';
+	          return '';
+	        },
+
+	        async loadFooterStats() {
           try {
             var runs = await fetch('/api/runs').then(r => r.json());
             if (!Array.isArray(runs)) return;

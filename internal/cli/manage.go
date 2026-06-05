@@ -122,7 +122,7 @@ func rerunCmd() *cobra.Command {
 				_ = tags
 			}
 			return executeRun(origArgs, name, r.Project, "", nil,
-				false, "", 0, execCWD)
+				false, "", 0, execCWD, "")
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")

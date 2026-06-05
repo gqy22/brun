@@ -41,13 +41,15 @@ func listCmd() *cobra.Command {
 
 			rows := make([]cmd.RunRow, len(runs))
 			for i, r := range runs {
+				diag := diagnosticSummaryLabel(r.RunDir)
 				rows[i] = cmd.RunRow{
-					ID:       r.ID,
-					Name:     r.Name,
-					Project:  r.Project,
-					Status:   r.Status,
-					Duration: cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
-					Command:  r.Command,
+					ID:         r.ID,
+					Name:       r.Name,
+					Project:    r.Project,
+					Status:     r.Status,
+					Diagnostic: diag,
+					Duration:   cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
+					Command:    r.Command,
 				}
 			}
 			fmt.Print(cmd.FormatRunList(rows))
@@ -110,10 +112,43 @@ func showCmd() *cobra.Command {
 				GitDirty:  r.GitDirty,
 				Tags:      tags,
 				Note:      note,
+				Diag:      toCmdDiagnosticDetail(readDiagnosticSummaryQuiet(r.RunDir)),
 			}
 			fmt.Print(cmd.FormatShow(detail))
 			return nil
 		},
+	}
+}
+
+func diagnosticSummaryLabel(runDir string) string {
+	summary := readDiagnosticSummaryQuiet(runDir)
+	if summary.ErrorCount > 0 {
+		return fmt.Sprintf("E%d", summary.ErrorCount)
+	}
+	if summary.WarningCount > 0 {
+		return fmt.Sprintf("W%d", summary.WarningCount)
+	}
+	return "-"
+}
+
+func readDiagnosticSummaryQuiet(runDir string) internal.DiagnosticSummary {
+	summary, err := internal.ReadDiagnosticSummary(runDir)
+	if err != nil {
+		internal.Log().Warn("diagnostic_summary_read_failed", "run_dir", runDir, "error", err.Error())
+		return internal.DiagnosticSummary{}
+	}
+	return summary
+}
+
+func toCmdDiagnosticDetail(summary internal.DiagnosticSummary) cmd.DiagnosticDetail {
+	return cmd.DiagnosticDetail{
+		InfoCount:    summary.InfoCount,
+		WarningCount: summary.WarningCount,
+		ErrorCount:   summary.ErrorCount,
+		LastLevel:    summary.LastLevel,
+		LastCode:     summary.LastCode,
+		LastMessage:  summary.LastMessage,
+		LastAt:       summary.LastAt,
 	}
 }
 

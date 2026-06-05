@@ -115,25 +115,31 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type runRow struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Project   string `json:"project"`
-		Status    string `json:"status"`
-		Duration  string `json:"duration"`
-		Command   string `json:"command"`
-		StartedAt string `json:"started_at"`
+		ID                string                     `json:"id"`
+		Name              string                     `json:"name"`
+		Project           string                     `json:"project"`
+		Status            string                     `json:"status"`
+		Duration          string                     `json:"duration"`
+		Command           string                     `json:"command"`
+		StartedAt         string                     `json:"started_at"`
+		DiagnosticSummary internal.DiagnosticSummary `json:"diagnostic_summary"`
 	}
 
 	rows := make([]runRow, len(runs))
 	for i, run := range runs {
+		diagnosticSummary, err := internal.ReadDiagnosticSummary(run.RunDir)
+		if err != nil {
+			internal.Log().Warn("diagnostic_summary_read_failed", "run_id", run.ID, "error", err.Error())
+		}
 		rows[i] = runRow{
-			ID:        run.ID,
-			Name:      run.Name,
-			Project:   run.Project,
-			Status:    run.Status,
-			Duration:  DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
-			Command:   truncate(run.Command, 80),
-			StartedAt: run.StartedAt,
+			ID:                run.ID,
+			Name:              run.Name,
+			Project:           run.Project,
+			Status:            run.Status,
+			Duration:          DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
+			Command:           truncate(run.Command, 80),
+			StartedAt:         run.StartedAt,
+			DiagnosticSummary: diagnosticSummary,
 		}
 	}
 	jsonResponse(w, rows)
@@ -150,37 +156,45 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 	tags, _ := s.store.GetTags(run.ID)
 	note, _ := s.store.GetNote(run.ID)
 	script, _ := ReadScriptSnapshot(run.RunDir)
+	diagnostics, err := internal.ReadDiagnostics(run.RunDir)
+	if err != nil {
+		internal.Log().Warn("diagnostics_read_failed", "run_id", run.ID, "error", err.Error())
+		diagnostics = nil
+	}
+	diagnosticSummary := internal.SummarizeDiagnostics(diagnostics)
 	processSummary := RunProcessSummary{}
 	if run.Status == "running" {
 		processSummary = s.buildRunProcessSummary(run)
 	}
 
 	jsonResponse(w, map[string]any{
-		"id":              run.ID,
-		"name":            run.Name,
-		"project":         run.Project,
-		"cwd":             run.CWD,
-		"command":         run.Command,
-		"script":          script.Content,
-		"script_name":     script.Name,
-		"status":          run.Status,
-		"exit_code":       run.ExitCode,
-		"started_at":      run.StartedAt,
-		"ended_at":        run.EndedAt,
-		"duration_ms":     run.DurationMs,
-		"duration":        DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
-		"hostname":        run.Hostname,
-		"username":        run.Username,
-		"git_repo":        run.GitRepo,
-		"git_branch":      run.GitBranch,
-		"git_commit":      run.GitCommit,
-		"git_dirty":       run.GitDirty,
-		"peak_rss_kb":     run.PeakRSSKB,
-		"cpu_time_ms":     run.CPUTimeMs,
-		"run_dir":         run.RunDir,
-		"tags":            tags,
-		"note":            note,
-		"process_summary": processSummary,
+		"id":                 run.ID,
+		"name":               run.Name,
+		"project":            run.Project,
+		"cwd":                run.CWD,
+		"command":            run.Command,
+		"script":             script.Content,
+		"script_name":        script.Name,
+		"status":             run.Status,
+		"exit_code":          run.ExitCode,
+		"started_at":         run.StartedAt,
+		"ended_at":           run.EndedAt,
+		"duration_ms":        run.DurationMs,
+		"duration":           DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
+		"hostname":           run.Hostname,
+		"username":           run.Username,
+		"git_repo":           run.GitRepo,
+		"git_branch":         run.GitBranch,
+		"git_commit":         run.GitCommit,
+		"git_dirty":          run.GitDirty,
+		"peak_rss_kb":        run.PeakRSSKB,
+		"cpu_time_ms":        run.CPUTimeMs,
+		"run_dir":            run.RunDir,
+		"tags":               tags,
+		"note":               note,
+		"diagnostics":        diagnostics,
+		"diagnostic_summary": diagnosticSummary,
+		"process_summary":    processSummary,
 	})
 }
 

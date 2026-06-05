@@ -112,6 +112,32 @@ func TestApiGetRun_ReturnsScriptSnapshotNameAndContent(t *testing.T) {
 	}
 }
 
+func TestApiGetRun_ReturnsDiagnostics(t *testing.T) {
+	srv, runID := newTestServer(t)
+	runDir := srv.getTestRunDir(t, runID)
+	writer := internal.NewDiagnosticWriter(runDir)
+	writer.Warning("metadata_write_failed", "metadata.yaml 写入失败", "permission denied")
+
+	w := srv.doReq("GET", "/api/runs/"+runID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Diagnostics []internal.DiagnosticEvent `json:"diagnostics"`
+		Summary     internal.DiagnosticSummary `json:"diagnostic_summary"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Summary.WarningCount != 1 {
+		t.Fatalf("WarningCount = %d, want 1", resp.Summary.WarningCount)
+	}
+	if len(resp.Diagnostics) != 1 || resp.Diagnostics[0].Code != "metadata_write_failed" {
+		t.Fatalf("diagnostics = %+v, want metadata_write_failed", resp.Diagnostics)
+	}
+}
+
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body
 func (ts *testSrv) fetchSSE(t *testing.T, urlPath string, timeout time.Duration) ([]byte, int) {
 	t.Helper()

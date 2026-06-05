@@ -100,6 +100,72 @@ func TestScriptCmdPathFlag(t *testing.T) {
 	}
 }
 
+func TestExecuteRunWritesDiagnostics(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	cwd := fastTempDir(t)
+
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, ""); err != nil {
+		t.Fatalf("executeRun() error = %v", err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	run, err := store.GetLatestRun()
+	if err != nil {
+		t.Fatalf("GetLatestRun() error = %v", err)
+	}
+	events, err := internal.ReadDiagnostics(run.RunDir)
+	if err != nil {
+		t.Fatalf("ReadDiagnostics() error = %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected diagnostics events")
+	}
+	var sawProjectInferred, sawScriptMissing bool
+	for _, event := range events {
+		if event.Code == "project_inferred" {
+			sawProjectInferred = true
+		}
+		if event.Code == "script_snapshot_missing" {
+			sawScriptMissing = true
+		}
+	}
+	if !sawProjectInferred {
+		t.Fatalf("missing project_inferred event: %+v", events)
+	}
+	if !sawScriptMissing {
+		t.Fatalf("missing script_snapshot_missing event: %+v", events)
+	}
+}
+
+func TestExecuteRunUsesProvidedRunID(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	cwd := fastTempDir(t)
+	runID := "20260605-091500-fixed1"
+
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, runID); err != nil {
+		t.Fatalf("executeRun() error = %v", err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	run, err := store.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q) error = %v", runID, err)
+	}
+	if run.RunDir != internal.RunDir(runID) {
+		t.Fatalf("RunDir = %q, want %q", run.RunDir, internal.RunDir(runID))
+	}
+}
+
 func fastTempDir(t *testing.T) string {
 	t.Helper()
 	base := "/dev/shm"

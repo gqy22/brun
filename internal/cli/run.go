@@ -66,6 +66,7 @@ func runCmd() *cobra.Command {
 	var timeout int
 	var cwdFlag string
 	var foreground bool
+	var runIDFlag string
 
 	c := &cobra.Command{
 		Use:   "run -- <command...>",
@@ -95,7 +96,7 @@ func runCmd() *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			if foreground {
 				return executeRun(args, name, project, note, tags,
-					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag)
+					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag, runIDFlag)
 			}
 			return detachRun(c, args, name, project, note, tags,
 				noFsDiff, allowExit, timeout, cwdFlag)
@@ -110,11 +111,13 @@ func runCmd() *cobra.Command {
 	c.Flags().IntVar(&timeout, "timeout", 0, "超时(秒)")
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录")
 	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
+	c.Flags().StringVar(&runIDFlag, "run-id", "", "内部使用: 指定 run ID")
+	c.Flags().MarkHidden("run-id")
 	return c
 }
 
 func executeRun(args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string) error {
+	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string) error {
 
 	// 后台模式: 忽略 SIGHUP，关闭终端后继续运行 (等效 nohup)
 	signal.Ignore(syscall.SIGHUP)
@@ -129,23 +132,39 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 1. 确定工作目录
 	cwd := cwdFlag
+	cwdInferred := false
 	if cwd == "" {
 		cwd = detectCWD(args[0])
+		cwdInferred = true
 	}
 
 	// 2. 生成 run_id + 创建 run_dir
-	runID := internal.GenerateRunID()
+	runID := runIDFlag
+	if runID == "" {
+		runID = internal.GenerateRunID()
+	}
 	runDir := internal.RunDir(runID)
 	if err := internal.EnsureDir(runDir); err != nil {
 		return fmt.Errorf("创建 run 目录失败: %w", err)
 	}
+	diagnostics := internal.NewDiagnosticWriter(runDir)
+	if cwdInferred {
+		diagnostics.Info("cwd_inferred", "已推断运行目录", cwd)
+	}
 
 	// 3. 识别 project + 读 brun.yaml
 	projName, projRoot := internal.DetectProject(cwd, internal.WithCLIProject(project))
+	if project == "" {
+		diagnostics.Info("project_inferred", "已推断项目名", projName)
+	}
 	cfgPath := filepath.Join(projRoot, "brun.yaml")
 	var cfg internal.Config
 	if data, err := os.ReadFile(cfgPath); err == nil {
-		cfg, _ = internal.ParseConfig(data)
+		if parsed, parseErr := internal.ParseConfig(data); parseErr == nil {
+			cfg = parsed
+		} else {
+			diagnostics.Warning("config_parse_failed", "brun.yaml 解析失败，已使用默认配置", parseErr.Error())
+		}
 	}
 	if project != "" {
 		projName = project
@@ -165,11 +184,19 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 6. 保存 command.sh + env.txt + 输入脚本快照
-	cmd.SaveCommandFile(runDir, commandStr)
-	cmd.SaveEnvFile(runDir)
+	if err := cmd.SaveCommandFile(runDir, commandStr); err != nil {
+		diagnostics.Warning("command_file_write_failed", "command.sh 写入失败", err.Error())
+	}
+	if err := cmd.SaveEnvFile(runDir); err != nil {
+		diagnostics.Warning("env_file_write_failed", "env.txt 写入失败", err.Error())
+	}
 	// 尝试从参数中找到实际的脚本文件（跳过解释器如 bash/python）
 	if scriptPath := findScriptArg(args); scriptPath != "" {
-		cmd.SaveInputScript(runDir, scriptPath)
+		if err := cmd.SaveInputScript(runDir, scriptPath); err != nil {
+			diagnostics.Warning("script_snapshot_failed", "脚本快照保存失败", err.Error())
+		}
+	} else {
+		diagnostics.Info("script_snapshot_missing", "未保存脚本快照", "未在命令参数中找到可读脚本文件")
 	}
 
 	// 7. 打印启动信息
@@ -208,8 +235,14 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 9. before 快照（如果不禁用 fs-diff）
 	var beforeSnapshot map[string]internal.FileInfo
+	fsDiffReady := false
 	if !noFsDiff {
-		beforeSnapshot, _ = internal.SnapshotDir(cwd, cfg.Ignore)
+		if snapshot, err := internal.SnapshotDir(cwd, cfg.Ignore); err == nil {
+			beforeSnapshot = snapshot
+			fsDiffReady = true
+		} else {
+			diagnostics.Warning("fs_snapshot_before_failed", "运行前文件快照失败", err.Error())
+		}
 	}
 
 	// 10. 执行命令（带信号处理）
@@ -230,57 +263,74 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 11. after 快照 + diff
 	if !noFsDiff {
-		afterSnapshot, _ := internal.SnapshotDir(cwd, cfg.Ignore)
-		created, modified, deleted := internal.DiffSnapshots(beforeSnapshot, afterSnapshot)
+		afterSnapshot, err := internal.SnapshotDir(cwd, cfg.Ignore)
+		if err != nil {
+			diagnostics.Warning("fs_snapshot_after_failed", "运行后文件快照失败", err.Error())
+			fsDiffReady = false
+		}
 
-		for _, f := range created {
-			absPath := filepath.Join(cwd, f.Path)
-			info, _ := os.Stat(absPath)
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
+		if fsDiffReady {
+			created, modified, deleted := internal.DiffSnapshots(beforeSnapshot, afterSnapshot)
+
+			for _, f := range created {
+				absPath := filepath.Join(cwd, f.Path)
+				info, _ := os.Stat(absPath)
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				if err := store.CreateArtifact(&internal.Artifact{
+					RunID:   runID,
+					Kind:    internal.ClassifyArtifact(f.Path),
+					Status:  "created",
+					Path:    f.Path,
+					AbsPath: absPath,
+					Size:    size,
+				}); err != nil {
+					diagnostics.Warning("artifact_write_failed", "输出文件记录写入失败", err.Error())
+				}
 			}
-			store.CreateArtifact(&internal.Artifact{
-				RunID:   runID,
-				Kind:    internal.ClassifyArtifact(f.Path),
-				Status:  "created",
-				Path:    f.Path,
-				AbsPath: absPath,
-				Size:    size,
-			})
-		}
-		for _, f := range modified {
-			absPath := filepath.Join(cwd, f.Path)
-			info, _ := os.Stat(absPath)
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
+			for _, f := range modified {
+				absPath := filepath.Join(cwd, f.Path)
+				info, _ := os.Stat(absPath)
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				if err := store.CreateArtifact(&internal.Artifact{
+					RunID:   runID,
+					Kind:    internal.ClassifyArtifact(f.Path),
+					Status:  "modified",
+					Path:    f.Path,
+					AbsPath: absPath,
+					Size:    size,
+				}); err != nil {
+					diagnostics.Warning("artifact_write_failed", "输出文件记录写入失败", err.Error())
+				}
 			}
-			store.CreateArtifact(&internal.Artifact{
-				RunID:   runID,
-				Kind:    internal.ClassifyArtifact(f.Path),
-				Status:  "modified",
-				Path:    f.Path,
-				AbsPath: absPath,
-				Size:    size,
-			})
-		}
-		for _, f := range deleted {
-			store.CreateArtifact(&internal.Artifact{
-				RunID:  runID,
-				Kind:   internal.ClassifyArtifact(f.Path),
-				Status: "deleted",
-				Path:   f.Path,
-			})
+			for _, f := range deleted {
+				if err := store.CreateArtifact(&internal.Artifact{
+					RunID:  runID,
+					Kind:   internal.ClassifyArtifact(f.Path),
+					Status: "deleted",
+					Path:   f.Path,
+				}); err != nil {
+					diagnostics.Warning("artifact_write_failed", "输出文件记录写入失败", err.Error())
+				}
+			}
 		}
 	}
 
 	// 12. 处理 tags 和 note
 	for _, t := range tags {
-		store.AddTag(runID, t)
+		if err := store.AddTag(runID, t); err != nil {
+			diagnostics.Warning("tag_write_failed", "标签写入失败", err.Error())
+		}
 	}
 	if note != "" {
-		store.AddNote(runID, note)
+		if err := store.AddNote(runID, note); err != nil {
+			diagnostics.Warning("note_write_failed", "备注写入失败", err.Error())
+		}
 	}
 
 	// 13. 确定最终状态 (allow-exit 覆盖)
@@ -296,7 +346,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 保存资源数据
-	store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs)
+	if err := store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs); err != nil {
+		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
+	}
 
 	// 15. 写 metadata.yaml
 	runRecord.Status = status
@@ -304,7 +356,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 	runRecord.EndedAt = result.EndedAt
 	runRecord.DurationMs = result.DurationMs
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
-	os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644)
+	if err := os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {
+		diagnostics.Warning("metadata_write_failed", "metadata.yaml 写入失败", err.Error())
+	}
 
 	// 16. 打印摘要
 	fmt.Printf("\nCommand finished %s in %s\n", status, cmd.DurationString(result.DurationMs))
@@ -328,16 +382,41 @@ func executeRun(args []string, name, project, note string, tags []string,
 	if len(arts) > 0 {
 		fmt.Printf("Outputs detected: %d\n", len(arts))
 	}
+	printDiagnosticSummary(runDir)
 
 	return nil
+}
+
+func printDiagnosticSummary(runDir string) {
+	events, err := internal.ReadDiagnostics(runDir)
+	if err != nil {
+		internal.Log().Warn("diagnostic_read_failed", "run_dir", runDir, "error", err.Error())
+		return
+	}
+	warnings := internal.DiagnosticWarnings(events)
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Printf("诊断提示:\n")
+	for _, warning := range warnings {
+		if warning.Detail != "" {
+			fmt.Printf("  ! %s：%s\n", warning.Message, warning.Detail)
+		} else {
+			fmt.Printf("  ! %s\n", warning.Message)
+		}
+	}
+	fmt.Printf("诊断文件: %s\n", filepath.Join(runDir, internal.DiagnosticsFileName))
 }
 
 // detachRun 将命令以后台 nohup 方式执行，等效于 nohup cmd > out.o 2> out.er &
 func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
 	noFsDiff bool, allowExit string, timeout int, cwdFlag string) error {
 
-	// 构建子进程参数: brun run --foreground [原有参数] -- <command>
-	childArgs := []string{"run", "--foreground"}
+	// 生成 run ID，父进程和子进程共享，确保提示、日志路径和数据库记录一致。
+	runID := internal.GenerateRunID()
+
+	// 构建子进程参数: brun run --foreground --run-id <id> [原有参数] -- <command>
+	childArgs := []string{"run", "--foreground", "--run-id", runID}
 
 	if name != "" {
 		childArgs = append(childArgs, "--name", name)
@@ -372,40 +451,32 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 		return fmt.Errorf("获取可执行路径失败: %w", err)
 	}
 
-	// 生成 run ID 用于输出文件命名
-	runID := internal.GenerateRunID()
-
 	// 输出目录: ~/.local/share/brun/runs/<run_id>/
 	runDir := internal.RunDir(runID)
-	os.MkdirAll(runDir, 0755)
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return fmt.Errorf("创建 run 目录失败: %w", err)
+	}
 
 	stdoutPath := filepath.Join(runDir, "stdout.o")
 	stderrPath := filepath.Join(runDir, "stderr.er")
 
-	stdoutF, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("创建 stdout 文件失败: %w", err)
-	}
-	stderrF, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		stdoutF.Close()
-		return fmt.Errorf("创建 stderr 文件失败: %w", err)
+		return fmt.Errorf("打开空输出失败: %w", err)
 	}
 
 	cmd := exec.Command(exePath, childArgs...)
-	cmd.Stdout = stdoutF
-	cmd.Stderr = stderrF
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
 
 	if err := cmd.Start(); err != nil {
-		stdoutF.Close()
-		stderrF.Close()
+		devNull.Close()
 		return fmt.Errorf("启动后台进程失败: %w", err)
 	}
-	stdoutF.Close()
-	stderrF.Close()
+	devNull.Close()
 
 	fmt.Printf("[nohup] PID=%d, RunID=%s\n", cmd.Process.Pid, runID)
 	fmt.Printf("[nohup] stdout: %s\n", stdoutPath)

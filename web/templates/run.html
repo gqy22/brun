@@ -78,12 +78,18 @@
                     <span>Memory</span>
                     <strong x-text="fmtMem(detail.peak_rss_kb)"></strong>
                   </div>
-                  <div class="summary-metric">
-                    <span>CPU</span>
-                    <strong x-text="fmtCPU(detail.cpu_time_ms)"></strong>
-                  </div>
-                  <template x-if="detail.status==='running' && processSummary.active_count > 0">
-                    <div class="summary-metric summary-metric-running">
+	                  <div class="summary-metric">
+	                    <span>CPU</span>
+	                    <strong x-text="fmtCPU(detail.cpu_time_ms)"></strong>
+	                  </div>
+	                  <template x-if="diagCount() > 0">
+	                    <div class="summary-metric summary-metric-warning">
+	                      <span>Diagnostics</span>
+	                      <strong x-text="diagSummaryLabel()"></strong>
+	                    </div>
+	                  </template>
+	                  <template x-if="detail.status==='running' && processSummary.active_count > 0">
+	                    <div class="summary-metric summary-metric-running">
                       <span>Active</span>
                       <strong x-text="processSummary.active_count"></strong>
                     </div>
@@ -94,10 +100,26 @@
                       <strong x-text="processSummary.process_count"></strong>
                     </div>
                   </template>
-                </div>
-              </div>
+	                </div>
+	              </div>
 
-              <div class="side-group-title">命令与环境</div>
+	              <template x-if="visibleDiagnostics().length > 0">
+	                <div class="diagnostics-panel">
+	                  <div class="diagnostics-title">诊断提示</div>
+	                  <template x-for="event in visibleDiagnostics()" :key="event.created_at + event.code">
+	                    <div :class="'diagnostic-item diagnostic-'+event.level">
+	                      <div class="diagnostic-line">
+	                        <span class="diagnostic-level" x-text="event.level"></span>
+	                        <span class="diagnostic-message" x-text="event.message"></span>
+	                      </div>
+	                      <div class="diagnostic-detail" x-show="event.detail" x-text="event.detail"></div>
+	                      <code class="diagnostic-code" x-text="event.code"></code>
+	                    </div>
+	                  </template>
+	                </div>
+	              </template>
+
+	              <div class="side-group-title">命令与环境</div>
               <template x-if="detail.name">
                 <div class="side-info"><label>Name</label><div class="side-value" x-text="detail.name"></div></div>
               </template>
@@ -346,8 +368,8 @@
         // --- 进程列表 ---
         processes: [],
         totalProcessRSS: 0,
-        processSummary: {},
-        processTimer: null,
+	        processSummary: {},
+	        processTimer: null,
 
         async init() {
           await this.loadDetail();
@@ -409,13 +431,35 @@
           return this.scriptDisplayContent.split('\n').length;
         },
 
-        get logMeta() {
+	        get logMeta() {
           if (!this._logContent) return '0 lines';
           var lines = this._logContent.split('\n').length;
-          return lines.toLocaleString() + ' lines';
-        },
+	          return lines.toLocaleString() + ' lines';
+	        },
 
-        renderScript() {
+	        diagCount() {
+	          var d = this.detail.diagnostic_summary || {};
+	          return (d.warning_count || 0) + (d.error_count || 0);
+	        },
+
+	        diagSummaryLabel() {
+	          var d = this.detail.diagnostic_summary || {};
+	          if ((d.error_count || 0) > 0 && (d.warning_count || 0) > 0) {
+	            return d.error_count + 'E ' + d.warning_count + 'W';
+	          }
+	          if ((d.error_count || 0) > 0) return d.error_count + 'E';
+	          if ((d.warning_count || 0) > 0) return d.warning_count + 'W';
+	          return '-';
+	        },
+
+	        visibleDiagnostics() {
+	          var events = this.detail.diagnostics || [];
+	          return events.filter(function(event) {
+	            return event.level === 'warning' || event.level === 'error';
+	          });
+	        },
+
+	        renderScript() {
           var self = this;
           setTimeout(function() {
             var el = document.getElementById('script-code');
