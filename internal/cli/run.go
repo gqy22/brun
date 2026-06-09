@@ -183,13 +183,6 @@ func executeRun(args []string, name, project, note string, tags []string,
 	// 5. 构建命令字符串
 	commandStr := strings.Join(args, " ")
 
-	// 5.5 预检查: 命令可执行文件是否存在
-	if exePath, err := exec.LookPath(args[0]); err != nil {
-		return cliError("command_not_found", fmt.Sprintf("命令 %q 未找到: %v", args[0], err), "确认命令在 PATH 中，或使用完整路径；命令格式为 brun run -- <command>", err)
-	} else {
-		args[0] = exePath // exec.LookPath 返回规范化路径
-	}
-
 	// 6. 保存 command.sh + env.txt + 输入脚本快照
 	if err := cmd.SaveCommandFile(runDir, commandStr); err != nil {
 		diagnostics.Warning("command_file_write_failed", "command.sh 写入失败", err.Error())
@@ -251,6 +244,33 @@ func executeRun(args []string, name, project, note string, tags []string,
 	diagnostics.SetAfterRecord(func() {
 		syncRunDiagnostics(store, runID, runDir)
 	})
+
+	// 8.5 预检查: 命令可执行文件是否存在。此时 run 记录已创建，启动失败也可查询。
+	if exePath, err := exec.LookPath(args[0]); err != nil {
+		message := fmt.Sprintf("命令 %q 未找到: %v", args[0], err)
+		diagnostics.Warning("command_not_found", message, "命令未启动")
+		stderrPath := filepath.Join(runDir, "stderr.er")
+		_ = os.WriteFile(stderrPath, []byte(message+"\n"), 0644)
+		result := cmd.RunResult{
+			ExitCode:          127,
+			Status:            "failed",
+			DurationMs:        0,
+			StartedAt:         now,
+			EndedAt:           time.Now().UTC().Format(time.RFC3339),
+			ResourceSupported: cmd.ResourceSupported(),
+			ResourceStatus:    "unavailable",
+		}
+		if err := finishRun(store, diagnostics, runRecord, result, "failed"); err != nil {
+			return err
+		}
+		fmt.Printf("\nCommand finished failed in %s\n", cmd.DurationString(result.DurationMs))
+		fmt.Printf("stderr (last 1 lines):\n  %s\n", message)
+		fmt.Printf("完整日志: brun logs %s --stderr\n", runID)
+		printDiagnosticSummary(runDir)
+		return nil
+	} else {
+		args[0] = exePath // exec.LookPath 返回规范化路径
+	}
 
 	// 9. before 快照（如果不禁用 fs-diff）
 	var beforeSnapshot map[string]internal.FileInfo
@@ -358,36 +378,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 		status = "success"
 	}
 
-	// 14. 更新 DB status
-	if err := store.UpdateRunStatus(runID, status, result.ExitCode,
-		result.EndedAt, result.DurationMs); err != nil {
-		return fmt.Errorf("更新状态失败: %w", err)
-	}
-
-	// 保存资源数据
-	if err := store.UpdateRunResources(runID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus); err != nil {
-		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
-	}
-
-	// 15. 写 metadata.yaml
-	runRecord.Status = status
-	runRecord.ExitCode = result.ExitCode
-	runRecord.EndedAt = result.EndedAt
-	runRecord.DurationMs = result.DurationMs
-	runRecord.PeakRSSKB = result.PeakRSSKB
-	runRecord.CPUTimeMs = result.CPUTimeMs
-	runRecord.ResourceSupported = result.ResourceSupported
-	runRecord.ResourceStatus = result.ResourceStatus
-	if summary, err := internal.ReadDiagnosticSummary(runDir); err == nil {
-		runRecord.DiagInfoCount = summary.InfoCount
-		runRecord.DiagWarningCount = summary.WarningCount
-		runRecord.DiagErrorCount = summary.ErrorCount
-		runRecord.DiagLastCode = summary.LastCode
-		runRecord.DiagLastAt = summary.LastAt
-	}
-	metaYAML := cmd.BuildMetadataYAML(runRecord)
-	if err := os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {
-		diagnostics.Warning("metadata_write_failed", "metadata.yaml 写入失败", err.Error())
+	// 14-15. 更新 DB status、资源数据和 metadata.yaml
+	if err := finishRun(store, diagnostics, runRecord, result, status); err != nil {
+		return err
 	}
 
 	// 16. 打印摘要
@@ -414,6 +407,37 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 	printDiagnosticSummary(runDir)
 
+	return nil
+}
+
+func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, runRecord *internal.Run, result cmd.RunResult, status string) error {
+	if err := store.UpdateRunStatus(runRecord.ID, status, result.ExitCode,
+		result.EndedAt, result.DurationMs); err != nil {
+		return fmt.Errorf("更新状态失败: %w", err)
+	}
+	if err := store.UpdateRunResources(runRecord.ID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus); err != nil {
+		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
+	}
+
+	runRecord.Status = status
+	runRecord.ExitCode = result.ExitCode
+	runRecord.EndedAt = result.EndedAt
+	runRecord.DurationMs = result.DurationMs
+	runRecord.PeakRSSKB = result.PeakRSSKB
+	runRecord.CPUTimeMs = result.CPUTimeMs
+	runRecord.ResourceSupported = result.ResourceSupported
+	runRecord.ResourceStatus = result.ResourceStatus
+	if summary, err := internal.ReadDiagnosticSummary(runRecord.RunDir); err == nil {
+		runRecord.DiagInfoCount = summary.InfoCount
+		runRecord.DiagWarningCount = summary.WarningCount
+		runRecord.DiagErrorCount = summary.ErrorCount
+		runRecord.DiagLastCode = summary.LastCode
+		runRecord.DiagLastAt = summary.LastAt
+	}
+	metaYAML := cmd.BuildMetadataYAML(runRecord)
+	if err := os.WriteFile(filepath.Join(runRecord.RunDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {
+		diagnostics.Warning("metadata_write_failed", "metadata.yaml 写入失败", err.Error())
+	}
 	return nil
 }
 

@@ -298,6 +298,42 @@ func TestExecuteRunFailsOnInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestExecuteRunRecordsMissingCommandAsFailed(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	cwd := fastTempDir(t)
+
+	if err := executeRun([]string{"nonexistent_command_abc123"}, "bad-cmd", "error-test", "", nil, true, "", 0, cwd, ""); err != nil {
+		t.Fatalf("executeRun() error = %v", err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	run, err := store.GetLatestRun()
+	if err != nil {
+		t.Fatalf("GetLatestRun() error = %v", err)
+	}
+	if run.Status != "failed" || run.ExitCode != 127 {
+		t.Fatalf("run status/exit = %q/%d, want failed/127", run.Status, run.ExitCode)
+	}
+	if !strings.Contains(run.Command, "nonexistent_command_abc123") {
+		t.Fatalf("run command = %q, want missing command name", run.Command)
+	}
+	if _, err := os.Stat(filepath.Join(run.RunDir, "metadata.yaml")); err != nil {
+		t.Fatalf("metadata.yaml missing: %v", err)
+	}
+	stderrData, err := os.ReadFile(filepath.Join(run.RunDir, "stderr.er"))
+	if err != nil {
+		t.Fatalf("stderr.er missing: %v", err)
+	}
+	if !strings.Contains(string(stderrData), "nonexistent_command_abc123") {
+		t.Fatalf("stderr.er missing command name: %s", string(stderrData))
+	}
+}
+
 func TestParseTimeFilterRejectsInvalidInput(t *testing.T) {
 	if _, err := parseTimeFilter("yesterday-ish"); err == nil {
 		t.Fatal("parseTimeFilter() expected error")
