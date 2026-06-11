@@ -535,3 +535,30 @@ func fastTempDir(t *testing.T) string {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
+
+func TestHostnameHelperReturnsStatus(t *testing.T) {
+	val, status := hostname()
+	if val == "" {
+		if status != "unavailable" {
+			t.Errorf("empty hostname should report unavailable, got %q", status)
+		}
+	} else {
+		if status != "ok" {
+			t.Errorf("non-empty hostname should report ok, got %q", status)
+		}
+	}
+}
+
+func TestUsernameHelperReportsUnavailableWhenUSERMissing(t *testing.T) {
+	t.Setenv("USER", "")
+	val, status := username()
+	if val != "" || status != "unavailable" {
+		t.Errorf("username = %q/%q, want empty/unavailable", val, status)
+	}
+
+	t.Setenv("USER", "alice")
+	val, status = username()
+	if val != "alice" || status != "ok" {
+		t.Errorf("username = %q/%q, want alice/ok", val, status)
+	}
+}

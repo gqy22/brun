@@ -64,13 +64,14 @@ func listCmd() *cobra.Command {
 			for i, r := range runs {
 				diag := diagnosticSummaryLabel(r)
 				rows[i] = cmd.RunRow{
-					ID:         r.ID,
-					Name:       r.Name,
-					Project:    r.Project,
-					Status:     r.Status,
-					Diagnostic: diag,
-					Duration:   cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
-					Command:    r.Command,
+					ID:            r.ID,
+					Name:          r.Name,
+					Project:       r.Project,
+					Status:        r.Status,
+					DisplayStatus: r.DisplayStatus(),
+					Diagnostic:    diag,
+					Duration:      cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
+					Command:       r.Command,
 				}
 			}
 			fmt.Print(cmd.FormatRunList(rows))
@@ -125,6 +126,7 @@ func showCmd() *cobra.Command {
 				Name:              r.Name,
 				Project:           r.Project,
 				Status:            r.Status,
+				DisplayStatus:     r.DisplayStatus(),
 				Command:           r.Command,
 				CWD:               r.CWD,
 				StartedAt:         r.StartedAt,
@@ -162,13 +164,16 @@ type runJSONPayload struct {
 	CWDSource         string                     `json:"cwd_source,omitempty"`
 	Command           string                     `json:"command"`
 	Status            string                     `json:"status"`
+	DisplayStatus     string                     `json:"display_status,omitempty"`
 	ExitCode          int                        `json:"exit_code"`
 	StartedAt         string                     `json:"started_at"`
 	EndedAt           string                     `json:"ended_at,omitempty"`
 	DurationMs        int64                      `json:"duration_ms"`
 	RunDir            string                     `json:"run_dir"`
 	Hostname          string                     `json:"hostname,omitempty"`
+	HostnameStatus    string                     `json:"hostname_status,omitempty"`
 	Username          string                     `json:"username,omitempty"`
+	UsernameStatus    string                     `json:"username_status,omitempty"`
 	GitRepo           string                     `json:"git_repo,omitempty"`
 	GitBranch         string                     `json:"git_branch,omitempty"`
 	GitCommit         string                     `json:"git_commit,omitempty"`
@@ -196,13 +201,16 @@ func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
 		CWDSource:         r.CWDSource,
 		Command:           r.Command,
 		Status:            r.Status,
+		DisplayStatus:     r.DisplayStatus(),
 		ExitCode:          r.ExitCode,
 		StartedAt:         r.StartedAt,
 		EndedAt:           r.EndedAt,
 		DurationMs:        r.DurationMs,
 		RunDir:            r.RunDir,
 		Hostname:          r.Hostname,
+		HostnameStatus:    r.HostnameStatus,
 		Username:          r.Username,
+		UsernameStatus:    r.UsernameStatus,
 		GitRepo:           r.GitRepo,
 		GitBranch:         r.GitBranch,
 		GitCommit:         r.GitCommit,

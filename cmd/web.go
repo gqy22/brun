@@ -131,6 +131,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 		Name              string                     `json:"name"`
 		Project           string                     `json:"project"`
 		Status            string                     `json:"status"`
+		DisplayStatus     string                     `json:"display_status"`
 		Duration          string                     `json:"duration"`
 		Command           string                     `json:"command"`
 		StartedAt         string                     `json:"started_at"`
@@ -144,6 +145,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 			Name:              run.Name,
 			Project:           run.Project,
 			Status:            run.Status,
+			DisplayStatus:     run.DisplayStatus(),
 			Duration:          DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
 			Command:           truncate(run.Command, 80),
 			StartedAt:         run.StartedAt,
@@ -189,13 +191,16 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		"script":             script.Content,
 		"script_name":        script.Name,
 		"status":             run.Status,
+		"display_status":     run.DisplayStatus(),
 		"exit_code":          run.ExitCode,
 		"started_at":         run.StartedAt,
 		"ended_at":           run.EndedAt,
 		"duration_ms":        run.DurationMs,
 		"duration":           DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
 		"hostname":           run.Hostname,
+		"hostname_status":    run.HostnameStatus,
 		"username":           run.Username,
+		"username_status":    run.UsernameStatus,
 		"git_repo":           run.GitRepo,
 		"git_branch":         run.GitBranch,
 		"git_commit":         run.GitCommit,

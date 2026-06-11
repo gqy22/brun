@@ -215,27 +215,31 @@ func executeRun(args []string, name, project, note string, tags []string,
 	defer store.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	host, hostStatus := hostname()
+	user, userStatus := username()
 	runRecord := &internal.Run{
-		ID:            runID,
-		Name:          name,
-		Project:       projName,
-		CWD:           cwd,
-		Command:       commandStr,
-		Status:        "running",
-		RunDir:        runDir,
-		StartedAt:     now,
-		Hostname:      hostname(),
-		Username:      username(),
-		GitRepo:       gitInfo.Repo,
-		GitBranch:     gitInfo.Branch,
-		GitCommit:     gitInfo.Commit,
-		GitDirty:      gitInfo.Dirty,
-		CondaStatus:   condaInfo.Status,
-		CondaEnv:      condaInfo.Env,
-		CondaPrefix:   condaInfo.Prefix,
-		PythonVersion: condaInfo.PythonVersion,
-		CWDSource:     cwdSource,
-		ProjectSource: projectSource,
+		ID:             runID,
+		Name:           name,
+		Project:        projName,
+		CWD:            cwd,
+		Command:        commandStr,
+		Status:         "running",
+		RunDir:         runDir,
+		StartedAt:      now,
+		Hostname:       host,
+		HostnameStatus: hostStatus,
+		Username:       user,
+		UsernameStatus: userStatus,
+		GitRepo:        gitInfo.Repo,
+		GitBranch:      gitInfo.Branch,
+		GitCommit:      gitInfo.Commit,
+		GitDirty:       gitInfo.Dirty,
+		CondaStatus:    condaInfo.Status,
+		CondaEnv:       condaInfo.Env,
+		CondaPrefix:    condaInfo.Prefix,
+		PythonVersion:  condaInfo.PythonVersion,
+		CWDSource:      cwdSource,
+		ProjectSource:  projectSource,
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
@@ -588,13 +592,18 @@ func parseAllowExit(s string) map[int]bool {
 
 // parseTimeFilter 将用户输入的时间过滤值转为 RFC3339
 // 支持: "2026-05-13", "1h", "2d", "today", "1w"
-func hostname() string {
-	h, _ := os.Hostname()
-	return h
+func hostname() (string, string) {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h, "ok"
+	}
+	return "", "unavailable"
 }
 
-func username() string {
-	return os.Getenv("USER")
+func username() (string, string) {
+	if u := os.Getenv("USER"); u != "" {
+		return u, "ok"
+	}
+	return "", "unavailable"
 }
 
 // detectCWD 智能检测工作目录：

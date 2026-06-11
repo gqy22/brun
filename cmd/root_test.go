@@ -108,6 +108,10 @@ func TestBuildMetadataYAML(t *testing.T) {
 		DiagInfoCount:     1,
 		DiagWarningCount:  2,
 		DiagErrorCount:    3,
+		Hostname:          "devbox",
+		HostnameStatus:    "ok",
+		Username:          "user",
+		UsernameStatus:    "ok",
 	}
 
 	yaml := BuildMetadataYAML(run)
@@ -118,6 +122,10 @@ func TestBuildMetadataYAML(t *testing.T) {
 		"echo hi",
 		"success",
 		"abc1234",
+		"hostname: devbox",
+		"hostname_status: ok",
+		"username: user",
+		"username_status: ok",
 		"conda_status: ok",
 		"conda_env: rnaseq",
 		"conda_prefix: /opt/conda/envs/rnaseq",

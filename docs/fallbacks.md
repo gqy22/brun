@@ -235,19 +235,19 @@
 
 ### 28. hostname 获取失败返回空
 
-- 类型：`silent-ignore`
-- 位置：`internal/cli/run.go:452`
-- 当前行为：`os.Hostname()` 错误被忽略，返回空字符串。
-- 影响：低风险，但记录不完整。
-- 建议：记录 warning，或在 metadata 中使用明确的 `unknown`。
+- 类型：`resolved`
+- 位置：`internal/cli/run.go:591`
+- 当前行为：`os.Hostname()` 错误或返回空字符串时，写入 `hostname_status=unavailable` 和空 `hostname`；正常路径写入 `hostname_status=ok`。
+- 影响：可以区分"未采集到"和"采集到但字段为空"。
+- 建议：保持显式状态；不需要再加 warning 诊断（采集失败本身不影响 run 主体）。
 
 ### 29. username 直接读取 USER
 
-- 类型：`default`
-- 位置：`internal/cli/run.go:457`
-- 当前行为：只读 `USER` 环境变量，不存在则为空。
-- 影响：在非交互环境或 Windows 上可能为空。
-- 建议：使用 `os/user` 或明确记录 `unknown`。
+- 类型：`resolved`
+- 位置：`internal/cli/run.go:596`
+- 当前行为：`USER` 环境变量存在时写入 `username_status=ok`，否则写入 `username_status=unavailable`。
+- 影响：在非交互环境或 Windows 上不再是隐式空字符串，状态显式可见。
+- 建议：保持显式状态；如果后续要支持 `os/user` 回退，需要在 metadata 中区分来源（与 git/git_status 同样的模式）。
 
 ### 30. README 和代码端口默认值曾不一致
 
@@ -329,6 +329,14 @@
 - 影响：智能体可以根据稳定错误码决定修参数、查 run 列表、修配置、检查权限或终止流程。
 - 建议：继续把数据库损坏、索引缺失、日志文件缺失、Web 端口占用等错误迁入同一格式。
 
+### success_with_warnings 展示状态
+
+- 类型：`resolved`
+- 位置：`internal/store.go`（`Run.DisplayStatus()`）、`internal/cli/query.go`、`cmd/query.go`、`cmd/web.go`
+- 当前行为：`Run.DisplayStatus()` 在 `Status=success` 且 `DiagWarningCount>0` 时返回 `success_with_warnings`，否则原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段。`status` 字段保持原值不变，agent 工具按 `status` 过滤不会被打乱。
+- 影响：智能体和前端可以在不读取诊断详情的前提下，快速区分"真成功"和"成功但记录链路有 warning"。
+- 建议：保持 `status` 与 `display_status` 双字段约定；如果未来引入 `failed_with_warnings` 或 `cancelled_with_warnings` 等同族语义，集中在 `DisplayStatus()` 一个函数里扩展。
+
 ## 建议清理顺序
 
 1. 继续处理会造成行为漂移的 fallback：Web 默认监听地址是否继续保留局域网默认，或增加更明确的安全提示。
@@ -342,7 +350,7 @@
 
 1. Web 默认监听地址重新评估：继续默认 `0.0.0.0` 需要在 help 和启动输出中足够明确；如改为 `127.0.0.1`，局域网访问必须显式 `--addr 0.0.0.0`。
 2. 剩余错误结构化：数据库损坏/缺失提示 `repair`，日志不可读提示 run 状态和 run_dir。
-3. Git/hostname/username 采集状态显式化，避免字段为空时无法判断是不存在还是采集失败。
+3. Git 采集状态显式化（hostname/username 已显式化完成）。
 
 ## 保留候选
 

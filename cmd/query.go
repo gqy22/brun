@@ -10,13 +10,14 @@ import (
 )
 
 type RunRow struct {
-	ID         string
-	Name       string
-	Project    string
-	Status     string
-	Diagnostic string
-	Duration   string
-	Command    string
+	ID           string
+	Name         string
+	Project      string
+	Status       string
+	DisplayStatus string
+	Diagnostic   string
+	Duration     string
+	Command      string
 }
 
 type RunDetail struct {
@@ -25,6 +26,7 @@ type RunDetail struct {
 	Project           string
 	ProjectSource     string
 	Status            string
+	DisplayStatus     string
 	Command           string
 	CWD               string
 	CWDSource         string
@@ -100,9 +102,9 @@ func FormatRunList(runs []RunRow) string {
 		return Gray("未找到运行记录。\n")
 	}
 	var b strings.Builder
-	b.WriteString(TableHeader("%-24s %-16s %-15s %-9s %-6s %-10s %s\n",
+	b.WriteString(TableHeader("%-24s %-16s %-15s %-22s %-6s %-10s %s\n",
 		"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION", "COMMAND"))
-	b.WriteString(Dim("----                     ----            -------         ------    ----   --------   -------\n"))
+	b.WriteString(Dim("----                     ----            -------         ------                ----   --------   -------\n"))
 	for _, r := range runs {
 		name := r.Name
 		if len(name) > 12 {
@@ -112,11 +114,15 @@ func FormatRunList(runs []RunRow) string {
 		if len(cmd) > 32 {
 			cmd = cmd[:29] + "..."
 		}
+		statusLabel := r.Status
+		if r.DisplayStatus != "" && r.DisplayStatus != r.Status {
+			statusLabel = r.Status + "(+" + strings.TrimPrefix(r.DisplayStatus, r.Status+"_") + ")"
+		}
 		fmt.Fprintf(&b, "%s %s %s %s %s %s %s\n",
 			PadRight(r.ID, 24),
 			PadRight(name, 16),
 			PadRight(r.Project, 15),
-			PadRight(StatusColor(r.Status), 9),
+			PadRight(StatusColor(statusLabel), 22),
 			PadRight(r.Diagnostic, 6),
 			PadRight(r.Duration, 10),
 			Dim(cmd))
@@ -135,6 +141,9 @@ func FormatShow(r *RunDetail) string {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Project Source:"), r.ProjectSource)
 	}
 	fmt.Fprintf(&b, "%s  %s\n", Bold("Status:"), StatusColor(r.Status))
+	if r.DisplayStatus != "" && r.DisplayStatus != r.Status {
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Display Status:"), StatusColor(r.DisplayStatus))
+	}
 	fmt.Fprintf(&b, "%s  %s\n", Bold("Command:"), r.Command)
 	fmt.Fprintf(&b, "%s  %s\n", Bold("CWD:"), Dim(r.CWD))
 	if r.CWDSource != "" {

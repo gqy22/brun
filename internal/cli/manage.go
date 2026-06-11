@@ -429,6 +429,10 @@ type runMetadata struct {
 	DurationMs        int64  `yaml:"duration_ms"`
 	GitCommit         string `yaml:"git_commit"`
 	GitDirty          bool   `yaml:"git_dirty"`
+	Hostname          string `yaml:"hostname"`
+	HostnameStatus    string `yaml:"hostname_status"`
+	Username          string `yaml:"username"`
+	UsernameStatus    string `yaml:"username_status"`
 	CondaStatus       string `yaml:"conda_status"`
 	CondaEnv          string `yaml:"conda_env"`
 	CondaPrefix       string `yaml:"conda_prefix"`
@@ -471,6 +475,10 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		DurationMs:        meta.DurationMs,
 		GitCommit:         meta.GitCommit,
 		GitDirty:          meta.GitDirty,
+		Hostname:          meta.Hostname,
+		HostnameStatus:    meta.HostnameStatus,
+		Username:          meta.Username,
+		UsernameStatus:    meta.UsernameStatus,
 		CondaStatus:       meta.CondaStatus,
 		CondaEnv:          meta.CondaEnv,
 		CondaPrefix:       meta.CondaPrefix,

@@ -37,7 +37,9 @@ func TestStore_CreateRun(t *testing.T) {
 		StartedAt:         time.Now().UTC().Format(time.RFC3339),
 		RunDir:            "/tmp/runs/2026/05/13/20260513-153012-a8f3c2",
 		Hostname:          "devbox",
+		HostnameStatus:    "ok",
 		Username:          "user",
+		UsernameStatus:    "ok",
 		CondaStatus:       "ok",
 		CondaEnv:          "rnaseq",
 		CondaPrefix:       "/opt/conda/envs/rnaseq",
@@ -73,6 +75,38 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if !got.ResourceSupported || got.ResourceStatus != "ok" || got.PeakRSSKB != 1024 || got.CPUTimeMs != 25 {
 		t.Errorf("resources = %+v, want supported ok 1024/25", got)
+	}
+	if got.Hostname != "devbox" || got.HostnameStatus != "ok" {
+		t.Errorf("hostname = %q/%q, want devbox/ok", got.Hostname, got.HostnameStatus)
+	}
+	if got.Username != "user" || got.UsernameStatus != "ok" {
+		t.Errorf("username = %q/%q, want user/ok", got.Username, got.UsernameStatus)
+	}
+}
+
+func TestRun_DisplayStatus(t *testing.T) {
+	cases := []struct {
+		name           string
+		status         string
+		warningCount   int
+		want           string
+	}{
+		{"success no warning", "success", 0, "success"},
+		{"success with warning", "success", 2, "success_with_warnings"},
+		{"failed no warning", "failed", 0, "failed"},
+		{"failed with warning", "failed", 1, "failed"},
+		{"running", "running", 0, "running"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Run{Status: tc.status, DiagWarningCount: tc.warningCount}
+			if got := r.DisplayStatus(); got != tc.want {
+				t.Errorf("DisplayStatus() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := (*Run)(nil).DisplayStatus(); got != "" {
+		t.Errorf("nil Run DisplayStatus() = %q, want \"\"", got)
 	}
 }
 

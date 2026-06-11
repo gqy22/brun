@@ -302,6 +302,18 @@ func BuildMetadataYAML(run *internal.Run) string {
 	if run.GitDirty {
 		b.WriteString("git_dirty: true\n")
 	}
+	if run.Hostname != "" {
+		fmt.Fprintf(&b, "hostname: %s\n", run.Hostname)
+	}
+	if run.HostnameStatus != "" {
+		fmt.Fprintf(&b, "hostname_status: %s\n", run.HostnameStatus)
+	}
+	if run.Username != "" {
+		fmt.Fprintf(&b, "username: %s\n", run.Username)
+	}
+	if run.UsernameStatus != "" {
+		fmt.Fprintf(&b, "username_status: %s\n", run.UsernameStatus)
+	}
 	if run.CondaStatus != "" {
 		fmt.Fprintf(&b, "conda_status: %s\n", run.CondaStatus)
 	}

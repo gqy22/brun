@@ -12,7 +12,7 @@ import (
 )
 
 const maxRetries = 5
-const schemaVersion = 5
+const schemaVersion = 6
 const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
@@ -34,7 +34,9 @@ type Run struct {
 	DurationMs        int64
 	RunDir            string
 	Hostname          string
+	HostnameStatus    string
 	Username          string
+	UsernameStatus    string
 	GitRepo           string
 	GitBranch         string
 	GitCommit         string
@@ -133,6 +135,20 @@ func configureDB(db *sql.DB) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// DisplayStatus 返回面向展示层的状态字符串。基础状态与 Status 一致，
+// 但当命令成功且诊断链路记录了 warning 时，会返回 success_with_warnings，
+// 用于在 list/show/Web 中显式表达"命令成功但记录链路存在警告"。
+// 字段 `status` 保持原值不变，保证按状态过滤的 agent 工具不被打乱。
+func (r *Run) DisplayStatus() string {
+	if r == nil {
+		return ""
+	}
+	if r.Status == "success" && r.DiagWarningCount > 0 {
+		return "success_with_warnings"
+	}
+	return r.Status
+}
+
 func (s *Store) migrate() error {
 	version, err := s.schemaVersion()
 	if err != nil {
@@ -210,6 +226,8 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN python_version TEXT`,
 		`ALTER TABLE runs ADD COLUMN resource_supported INTEGER DEFAULT 0`,
 		`ALTER TABLE runs ADD COLUMN resource_status TEXT`,
+		`ALTER TABLE runs ADD COLUMN hostname_status TEXT`,
+		`ALTER TABLE runs ADD COLUMN username_status TEXT`,
 	}
 	var lastErr error
 	delay := retryDelay
@@ -327,11 +345,11 @@ func searchString(s, sub string) bool {
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,hostname_status,username,username_status,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
-		r.RunDir, r.Hostname, r.Username, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
+		r.RunDir, r.Hostname, r.HostnameStatus, r.Username, r.UsernameStatus, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
 		r.CondaStatus, r.CondaEnv, r.CondaPrefix, r.PythonVersion,
 		b2i(r.ResourceSupported), r.ResourceStatus,
 		r.PeakRSSKB, r.CPUTimeMs, r.DiagInfoCount, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
@@ -342,9 +360,9 @@ func (s *Store) CreateRun(r *Run) error {
 func (s *Store) GetRun(id string) (*Run, error) {
 	r := &Run{}
 	err := s.db.QueryRow(
-		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE id=?`, id,
+		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE id=?`, id,
 	).Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
-		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
+		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.HostnameStatus, &r.Username, &r.UsernameStatus,
 		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty,
 		&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus, &r.PeakRSSKB, &r.CPUTimeMs,
 		&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
@@ -378,7 +396,7 @@ func (s *Store) UpdateRunDiagnostics(id string, summary DiagnosticSummary) error
 }
 
 func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string) ([]*Run, error) {
-	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,username,git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
+	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
 	args := []any{}
 
 	if project != "" {
@@ -421,7 +439,7 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 	for rows.Next() {
 		r := &Run{}
 		err := rows.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
-			&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.Username,
+			&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.HostnameStatus, &r.Username, &r.UsernameStatus,
 			&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty,
 			&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus, &r.PeakRSSKB, &r.CPUTimeMs,
 			&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
