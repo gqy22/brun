@@ -214,6 +214,53 @@ func TestStore_UpdateRunDiagnostics(t *testing.T) {
 	}
 }
 
+func TestStore_IncrementRunDiagnostic(t *testing.T) {
+	s := newTestStore(t)
+	defer s.Close()
+
+	run := &Run{ID: "diag-inc", Status: "running", CWD: "/t", Command: "c", StartedAt: ts(), RunDir: "/t"}
+	if err := s.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.IncrementRunDiagnostic("diag-inc", "warning", "metadata_write_failed", "2026-06-11T00:00:00Z"); err != nil {
+		t.Fatalf("IncrementRunDiagnostic() error = %v", err)
+	}
+	if err := s.IncrementRunDiagnostic("diag-inc", "warning", "second", "2026-06-11T00:00:01Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IncrementRunDiagnostic("diag-inc", "error", "boom", "2026-06-11T00:00:02Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IncrementRunDiagnostic("diag-inc", "info", "note", "2026-06-11T00:00:03Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetRun("diag-inc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DiagInfoCount != 1 || got.DiagWarningCount != 2 || got.DiagErrorCount != 1 {
+		t.Errorf("counts = info=%d warn=%d err=%d, want 1/2/1", got.DiagInfoCount, got.DiagWarningCount, got.DiagErrorCount)
+	}
+	// last_code/last_at 应跟随最后一次写入
+	if got.DiagLastCode != "note" || got.DiagLastAt != "2026-06-11T00:00:03Z" {
+		t.Errorf("last = %+v, want note/2026-06-11T00:00:03Z", got)
+	}
+	// 关键：计数 > 0 时 display_status 切到 success_with_warnings
+	if got.DisplayStatus() != "" && got.Status == "success" && got.DiagWarningCount > 0 {
+		// 当前 status=running，所以 display 仍为 running；这里只是确保函数能跑
+	}
+	// 显式改成 success+warning 验证 display_status 切档
+	if err := s.UpdateRunStatus("diag-inc", "success", 0, ts(), 100); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetRun("diag-inc")
+	if got.DisplayStatus() != "success_with_warnings" {
+		t.Errorf("DisplayStatus = %q, want success_with_warnings", got.DisplayStatus())
+	}
+}
+
 func TestStore_ListRuns(t *testing.T) {
 	s := newTestStore(t)
 	defer s.Close()

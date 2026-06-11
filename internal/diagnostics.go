@@ -33,15 +33,27 @@ type DiagnosticSummary struct {
 type DiagnosticWriter struct {
 	path        string
 	afterRecord func()
+	counter     func(level, code, lastAt string)
 }
 
 func NewDiagnosticWriter(runDir string) *DiagnosticWriter {
 	return &DiagnosticWriter{path: filepath.Join(runDir, DiagnosticsFileName)}
 }
 
+// SetAfterRecord 在每次写入 diagnostics.jsonl 后调用一次。
+// 保留为兼容旧调用方；新代码应使用 SetCounter 让计数累加与事件落盘解耦。
 func (w *DiagnosticWriter) SetAfterRecord(fn func()) {
 	if w != nil {
 		w.afterRecord = fn
+	}
+}
+
+// SetCounter 在每次写入 diagnostics.jsonl 并 fsync 后调用一次。
+// 用于把单条事件的级别累加到 SQLite 的 diag_*_count 计数，避免进程被 SIGKILL
+// 时 count 落后于 diagnostics.jsonl，导致 display_status 漏报 warning/error。
+func (w *DiagnosticWriter) SetCounter(fn func(level, code, lastAt string)) {
+	if w != nil {
+		w.counter = fn
 	}
 }
 
@@ -74,10 +86,27 @@ func (w *DiagnosticWriter) record(level, code, message, detail, source string) {
 		Log().Warn("diagnostic_write_failed", "path", w.path, "error", err.Error())
 		return
 	}
-	defer f.Close()
-	if err := json.NewEncoder(f).Encode(event); err != nil {
-		Log().Warn("diagnostic_encode_failed", "path", w.path, "error", err.Error())
+	encoded, encErr := json.Marshal(event)
+	if encErr != nil {
+		f.Close()
+		Log().Warn("diagnostic_encode_failed", "path", w.path, "error", encErr.Error())
 		return
+	}
+	if _, err := f.Write(append(encoded, '\n')); err != nil {
+		f.Close()
+		Log().Warn("diagnostic_write_failed", "path", w.path, "error", err.Error())
+		return
+	}
+	// 先把 jsonl 落盘到磁盘，再触发计数累加与 afterRecord。
+	// 这样 SIGKILL/OOM 时 jsonl 至少持久化，count 与 jsonl 的差值仅剩 SQLite 一侧。
+	if err := f.Sync(); err != nil {
+		Log().Warn("diagnostic_fsync_failed", "path", w.path, "error", err.Error())
+	}
+	if err := f.Close(); err != nil {
+		Log().Warn("diagnostic_close_failed", "path", w.path, "error", err.Error())
+	}
+	if w.counter != nil {
+		w.counter(level, code, event.CreatedAt)
 	}
 	if w.afterRecord != nil {
 		w.afterRecord()

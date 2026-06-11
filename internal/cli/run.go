@@ -245,8 +245,12 @@ func executeRun(args []string, name, project, note string, tags []string,
 		return fmt.Errorf("写入数据库失败: %w", err)
 	}
 	syncRunDiagnostics(store, runID, runDir)
-	diagnostics.SetAfterRecord(func() {
-		syncRunDiagnostics(store, runID, runDir)
+	// 立即累加模式：每次写完 diagnostics.jsonl 并 fsync 后，对 SQLite 计数 +1，
+	// 避免 SIGKILL/OOM kill 在 finishRun 之前发生时 display_status 漏报 warning。
+	diagnostics.SetCounter(func(level, code, lastAt string) {
+		if err := store.IncrementRunDiagnostic(runID, level, code, lastAt); err != nil {
+			internal.Log().Warn("diagnostic_counter_increment_failed", "run_id", runID, "level", level, "error", err.Error())
+		}
 	})
 
 	// 8.5 预检查: 命令可执行文件是否存在。此时 run 记录已创建，启动失败也可查询。
@@ -437,6 +441,9 @@ func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, ru
 		runRecord.DiagErrorCount = summary.ErrorCount
 		runRecord.DiagLastCode = summary.LastCode
 		runRecord.DiagLastAt = summary.LastAt
+		// 终态一致性：以 jsonl 真实计数为准再写一次 SQLite，
+		// 覆盖掉期间任何 IncrementRunDiagnostic 漏掉的事件。
+		_ = store.UpdateRunDiagnostics(runRecord.ID, summary)
 	}
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
 	if err := os.WriteFile(filepath.Join(runRecord.RunDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {

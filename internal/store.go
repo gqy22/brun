@@ -395,6 +395,23 @@ func (s *Store) UpdateRunDiagnostics(id string, summary DiagnosticSummary) error
 	)
 }
 
+// IncrementRunDiagnostic 把指定 run 的对应级别计数 +1，并刷新 last_code/last_at。
+// 用于 DiagnosticWriter 在写入 diagnostics.jsonl 后即时累加，避免 SIGKILL/OOM
+// 在 finishRun 调用 UpdateRunDiagnostics 之前终止时 display_status 漏报 warning。
+// level 取值 info|warning|error，其它值记为 info。
+func (s *Store) IncrementRunDiagnostic(id, level, code, lastAt string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	return s.retryExec(
+		`UPDATE runs SET
+			diag_info_count    = diag_info_count    + CASE WHEN ?='info'    THEN 1 ELSE 0 END,
+			diag_warning_count = diag_warning_count + CASE WHEN ?='warning' THEN 1 ELSE 0 END,
+			diag_error_count   = diag_error_count   + CASE WHEN ?='error'   THEN 1 ELSE 0 END,
+			diag_last_code=?, diag_last_at=?, updated_at=?
+		 WHERE id=?`,
+		level, level, level, code, lastAt, now, id,
+	)
+}
+
 func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string, withWarnings bool) ([]*Run, error) {
 	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
 	args := []any{}

@@ -70,3 +70,35 @@ func TestDiagnosticSummaryFromRunIncludesInfoCount(t *testing.T) {
 		t.Fatalf("last event summary = %+v", summary)
 	}
 }
+
+func TestDiagnosticWriterInvokesCounterAfterJSONL(t *testing.T) {
+	runDir := fastTempDir(t)
+	writer := NewDiagnosticWriter(runDir)
+
+	var calls []string
+	writer.SetCounter(func(level, code, lastAt string) {
+		calls = append(calls, level+":"+code+"@"+lastAt)
+	})
+
+	writer.Info("cwd_inferred", "已推断运行目录", "/tmp/project")
+	writer.Warning("metadata_write_failed", "metadata.yaml 写入失败", "permission denied")
+	writer.Error("boom", "crash", "")
+
+	if len(calls) != 3 {
+		t.Fatalf("counter called %d times, want 3", len(calls))
+	}
+	wantPrefixes := []string{"info:cwd_inferred@", "warning:metadata_write_failed@", "error:boom@"}
+	for i, want := range wantPrefixes {
+		if len(calls[i]) < len(want) || calls[i][:len(want)] != want {
+			t.Errorf("call %d = %q, want prefix %q", i, calls[i], want)
+		}
+	}
+
+	events, err := ReadDiagnostics(runDir)
+	if err != nil {
+		t.Fatalf("ReadDiagnostics() error = %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("jsonl events = %d, want 3", len(events))
+	}
+}
