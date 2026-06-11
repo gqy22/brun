@@ -81,10 +81,11 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 当前命令体系已经形成 5 组稳定入口：
 
 1. 运行入口：`brun run -- <command>`。
-2. 查询入口：`brun list`、`brun show`、`brun logs`、`brun outputs`、`brun script`、`brun diag`。
-3. 标注和复用：`brun tag`、`brun note`、`brun rerun`。
-4. 维护入口：`brun repair`、`brun clean`。
-5. 工具界面和模板：`brun web`、`brun init`。
+2. 控制入口：`brun stop <run_id>`（终止运行中任务）。
+3. 查询入口：`brun list`、`brun show`、`brun logs`、`brun outputs`、`brun script`、`brun diag`。
+4. 标注和复用：`brun tag`、`brun note`、`brun rerun`。
+5. 维护入口：`brun repair`、`brun clean`。
+6. 工具界面和模板：`brun web`、`brun init`。
 
 已完成：
 

@@ -116,6 +116,90 @@ func noteCmd() *cobra.Command {
 	return c
 }
 
+// --- stop ---
+
+func stopCmd() *cobra.Command {
+	var latest bool
+	var force bool
+
+	c := &cobra.Command{
+		Use:   "stop <run_id>",
+		Short: "终止运行中的任务",
+		Long: "向运行中的任务发送终止信号（SIGTERM），等待优雅退出后强制结束（SIGKILL）。\n" +
+			"终止的是整个进程组，包括所有子进程。任务状态会自动更新为 failed。",
+		Example: `  brun stop 20260605-145615-fed727
+  brun stop --latest
+  brun stop --latest --force`,
+		Args: runSelectorArgs(&latest),
+		RunE: func(c *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			run, err := selectedRun(store, args, latest)
+			if err != nil {
+				return runLookupError(err)
+			}
+
+			if run.Status != "running" {
+				return cliError("stop_not_running",
+					fmt.Sprintf("任务 %s 当前状态为 %s，无法终止", run.ID, run.Status),
+					"只能终止状态为 running 的任务；使用 brun list 查看运行中的任务", nil)
+			}
+
+			pidFile := filepath.Join(run.RunDir, ".pid")
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				if os.IsNotExist(err) {
+					_ = store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+					return cliError("stop_no_pidfile",
+						fmt.Sprintf("找不到 %s 的进程信息（PID 文件不存在）", run.ID),
+						"任务可能已经自行结束；使用 brun show "+run.ID+" 确认当前状态", nil)
+				}
+				return cliError("stop_read_pidfile",
+					fmt.Sprintf("读取 PID 文件失败: %v", err),
+					"检查 run 目录权限: "+run.RunDir, err)
+			}
+
+			var pid int
+			if _, scanErr := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); scanErr != nil || pid <= 0 {
+				return cliError("stop_invalid_pid",
+					fmt.Sprintf("无效的 PID: %q", strings.TrimSpace(string(data))),
+					"PID 文件可能损坏，建议确认任务状态后手动处理", nil)
+			}
+
+			// 记录最终资源数据
+			pss, cst := cmd.ReadProcStats(pid)
+			if pss > 0 || cst > 0 {
+				_ = store.UpdateRunResources(run.ID, pss, cst, cmd.ResourceSupported(), "ok")
+			}
+
+			fmt.Printf("正在终止任务 %s (PID: %d, 命令: %s)...\n", run.ID, pid, run.Command)
+
+			// 调用统一的 StopRun，3 秒宽限期
+			result := cmd.StopRun(pid, 3, force)
+
+			if result.AlreadyDead {
+				_ = store.UpdateRunStatus(run.ID, "failed", -1, "", 0)
+				fmt.Printf("%s\n", result.Msg)
+				return nil
+			}
+
+			if !result.OK {
+				return cliError("stop_failed", result.Msg, "检查进程状态和权限；可尝试 brun stop "+run.ID+" --force", nil)
+			}
+
+			fmt.Printf("%s\n", result.Msg)
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&latest, "latest", false, "终止最新运行中的任务")
+	c.Flags().BoolVarP(&force, "force", "f", false, "跳过宽限期直接强制终止 (SIGKILL)")
+	return c
+}
+
 // --- rerun ---
 
 func rerunCmd() *cobra.Command {

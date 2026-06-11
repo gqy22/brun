@@ -85,6 +85,7 @@ func Execute(opts Options) error {
 	rootCmd.AddCommand(
 		initCmd(),
 		runCmd(),
+		stopCmd(),
 		listCmd(),
 		showCmd(),
 		scriptCmd(),

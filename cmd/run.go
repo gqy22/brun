@@ -184,7 +184,7 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	if timeout > 0 {
 		timer := time.AfterFunc(timeout, func() {
 			if cmd.Process != nil {
-				killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+				KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 			}
 		})
 		defer timer.Stop()
@@ -210,12 +210,12 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		interrupted = true
 		// 收到信号，优雅终止子进程组
 		if cmd.Process.Pid > 0 {
-			killProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
+			KillProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
 			select {
 			case waitErr := <-done:
 				err = waitErr
 			case <-time.After(2 * second):
-				killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+				KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 				err = <-done
 			}
 		}

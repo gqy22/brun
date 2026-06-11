@@ -505,27 +505,25 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 探活：signal 0 不发送实际信号，仅检查进程是否存在
-	if err := syscall.Kill(pid, 0); err != nil {
-		if err == syscall.ESRCH {
-			// 进程已不存在，自动修正状态为 failed
-			s.store.UpdateRunStatus(id, "failed", -1, "", 0)
-			jsonResponse(w, map[string]any{"ok": true, "msg": fmt.Sprintf("进程 %d 已不存在，已自动标记为 failed", pid)})
-			return
-		}
-		httpError(w, fmt.Sprintf("无法访问进程 %d: %v", pid, err), 500)
-		return
-	}
-
-	pss, cst := readProcStats(pid)
+	// 记录最终资源数据
+	pss, cst := ReadProcStats(pid)
 	if pss > 0 || cst > 0 {
 		s.store.UpdateRunResources(id, pss, cst, ResourceSupported(), "ok")
 	}
 
-	if err := killProcessGroup(pid, syscall.SIGTERM); err != nil {
-		syscall.Kill(pid, syscall.SIGTERM)
+	// 调用统一的 StopRun，3 秒宽限期
+	result := StopRun(pid, 3, false)
+
+	if result.AlreadyDead {
+		s.store.UpdateRunStatus(id, "failed", -1, "", 0)
 	}
-	jsonResponse(w, map[string]any{"ok": true, "killed": pid, "msg": "已发送终止信号"})
+
+	if !result.OK {
+		httpError(w, result.Msg, 500)
+		return
+	}
+
+	jsonResponse(w, map[string]any{"ok": true, "killed": result.PID, "msg": result.Msg})
 }
 
 func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {

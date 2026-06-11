@@ -8,6 +8,15 @@
 
 ### 新增
 
+- **CLI `brun stop` 命令**：终止运行中的任务
+  - 用法：`brun stop <run_id>` / `brun stop --latest` / `brun stop <run_id> -f`
+  - SIGTERM → 3 秒宽限期 → SIGKILL 两阶段优雅终止
+  - `-f` / `--force` 跳过宽限期直接强制终止
+  - 自动探活（signal 0），进程已死则标记为 failed
+  - 终止前记录最终资源数据
+- **统一终止逻辑**：Web Dashboard 的 kill 接口与 CLI `stop` 共用 `cmd.StopRun()` 函数
+  - Web `POST /api/runs/{id}/kill` 现在也具备 3 秒宽限期和超时 SIGKILL（之前发完信号即返回）
+  - Linux 和非 Linux 平台均有实现
 - **CLI `brun show` 显示资源数据**：输出新增 Memory（Peak RSS）和 CPU Time 字段，与 Web 详情页信息对齐
 - **运行中任务进程列表**：
   - 新增 `GET /api/runs/{id}/processes` API，实时返回同组子进程列表（PID/PPID/Command/State/RSS/CPU）

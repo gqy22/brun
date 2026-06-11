@@ -187,6 +187,21 @@ brun rerun --latest --dry-run      # 先看看会执行什么
 brun rerun --latest                # 确认后真正复跑
 ```
 
+### 终止运行中的任务
+
+```bash
+brun stop <run_id>                 # 终止指定任务（SIGTERM + 3s 宽限期）
+brun stop --latest                 # 终止最新运行中的任务
+brun stop <run_id> -f              # 强制终止（跳过宽限期，直接 SIGKILL）
+```
+
+终止机制：
+- 向整个进程组发送 `SIGTERM`，等待 3 秒优雅退出
+- 超时未退出则升级为 `SIGKILL` 强制结束
+- 自动探活：进程已不存在时自动标记为 `failed`
+- 终止前记录最终资源数据（Peak RSS / CPU Time）
+- CLI 和 Web Dashboard 共用同一套终止逻辑（`cmd.StopRun`）
+
 ## Web Dashboard
 
 启动后浏览器访问即可使用完整可视化管理界面：
@@ -254,6 +269,7 @@ http://192.168.1.x:9213
 | `brun diag <id>` | 查看运行诊断 | `brun diag --latest --all` |
 | `brun tag <id> TAG...` | 添加标签 | `brun tag --latest sample:S1 production` |
 | `brun note <id> "text"` | 添加备注 | `brun note --latest "参数说明"` |
+| `brun stop <id>` | 终止运行中的任务 | `brun stop --latest` / `brun stop <id> -f` |
 | `brun rerun <id>` | 重新运行 | `brun rerun --latest --dry-run` |
 | `brun web` | 启动 Web Dashboard | `brun web --port 8080` |
 | `brun init` | 生成 brun.yaml | `brun init my-proj` |
