@@ -12,7 +12,7 @@ import (
 )
 
 const maxRetries = 5
-const schemaVersion = 6
+const schemaVersion = 7
 const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
@@ -236,6 +236,13 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN resource_status TEXT`,
 		`ALTER TABLE runs ADD COLUMN hostname_status TEXT`,
 		`ALTER TABLE runs ADD COLUMN username_status TEXT`,
+		// 迁移回填：老 run 已有 hostname/username 文本，但 *_status 还是 NULL。
+		// 已有值说明采集成功，新状态记 ok；空字符串 / NULL 说明采集失败，
+		// 新状态记 unavailable。这两步是幂等的，重复执行也是 no-op。
+		`UPDATE runs SET hostname_status='ok' WHERE hostname_status IS NULL AND hostname IS NOT NULL AND hostname != ''`,
+		`UPDATE runs SET hostname_status='unavailable' WHERE hostname_status IS NULL`,
+		`UPDATE runs SET username_status='ok' WHERE username_status IS NULL AND username IS NOT NULL AND username != ''`,
+		`UPDATE runs SET username_status='unavailable' WHERE username_status IS NULL`,
 	}
 	var lastErr error
 	delay := retryDelay

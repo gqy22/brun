@@ -471,6 +471,76 @@ func TestStore_GetLatestRun(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateBackfillsEnvStatus(t *testing.T) {
+	dir := fastTempDir(t)
+	dbPath := filepath.Join(dir, "test.db")
+
+	// 1) 准备一个 v5 状态的老库：schema 升级到当前版本（v7），并模拟两个老 run。
+	//    r-ok 已经采集到 hostname/username；r-empty 没有值。
+	//    然后把 user_version 拨回 5，模拟"v5 老库"等待升级。
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(&Run{ID: "r-ok", Status: "success", RunDir: dir, CWD: dir, StartedAt: ts()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(&Run{ID: "r-empty", Status: "failed", RunDir: dir, CWD: dir, StartedAt: ts()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET hostname='legacy-host', username='legacy-user', hostname_status=NULL, username_status=NULL WHERE id='r-ok'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET hostname='', username='', hostname_status=NULL, username_status=NULL WHERE id='r-empty'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`PRAGMA user_version=5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2) 重新打开：触发 v5→v7 迁移，UPDATE 回填应该把状态从 NULL 写成 ok / unavailable
+	s, err = NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// r-ok 已有 hostname/username → *status=ok
+	rOK, err := s.GetRun("r-ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rOK.HostnameStatus != "ok" {
+		t.Errorf("r-ok hostname_status = %q, want ok", rOK.HostnameStatus)
+	}
+	if rOK.UsernameStatus != "ok" {
+		t.Errorf("r-ok username_status = %q, want ok", rOK.UsernameStatus)
+	}
+
+	// r-empty 采集失败 → *status=unavailable
+	rEmpty, err := s.GetRun("r-empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rEmpty.HostnameStatus != "unavailable" {
+		t.Errorf("r-empty hostname_status = %q, want unavailable", rEmpty.HostnameStatus)
+	}
+	if rEmpty.UsernameStatus != "unavailable" {
+		t.Errorf("r-empty username_status = %q, want unavailable", rEmpty.UsernameStatus)
+	}
+
+	// 3) 幂等：再触发一次迁移，状态应该保持不变
+	if err := s.migrate(); err != nil {
+		t.Fatalf("re-migrate: %v", err)
+	}
+	rOK2, _ := s.GetRun("r-ok")
+	if rOK2.HostnameStatus != "ok" || rOK2.UsernameStatus != "ok" {
+		t.Errorf("after re-migrate: r-ok status drifted to %q / %q", rOK2.HostnameStatus, rOK2.UsernameStatus)
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := NewStore(filepath.Join(fastTempDir(t), "test.db"))

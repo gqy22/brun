@@ -114,6 +114,8 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` 已落地。`Run.DisplayStatus()` 在 `DiagWarningCount>0` 且基础状态为 `success/failed/cancelled` 时分别返回三种 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选下拉新增 `failed_with_warnings` 和 `cancelled_with_warnings` 选项，行色与徽标用 `*_with_warnings` CSS 变体高亮。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。
 
+已完成：schema 升至 v7 并加入 `hostname_status` / `username_status` 的迁移回填。v5 → v7 升级时，对已存在的 `runs` 行执行：`hostname`/`username` 非空则回填 `ok`，否则回填 `unavailable`；`WHERE *_status IS NULL` 限定保证幂等，老库升级一次即可，不再二次改写。
+
 ## 中长期：任务调度与依赖运行
 
 ### 背景
