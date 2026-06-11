@@ -89,21 +89,30 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：
 
-1. 命令体验规范化：已支持 `brun -- <command>` 作为 `brun run -- <command>` 的快捷入口；只运行 `brun` 继续显示帮助，不默认执行任何动作；误写成 `brun sh -c ...` 这类缺少 `--` 的形式会返回 `missing_command_separator`。
+1. 命令体验规范化：已支持 `brun -- <command>` 作为 `brun run -- <command>` 的快捷入口；只运行 `brun` 继续显示帮助，不默认执行任何动作；缺少 `--` 分隔符的写法会返回 `missing_command_separator`，并且会作为一条 `failed` run 落库（写入 `diagnostics.jsonl`、SQLite、`metadata.yaml`），而不是只输出错误就退出。
 2. JSON 和错误契约补齐：`brun list/show/outputs/diag/clean` 均支持 JSON；常见可恢复错误输出稳定 `Code` 和 `Hint`。
 3. `brun clean` 已从占位命令改为可执行维护命令：必须提供 `--older-than`，默认只预览，只有 `--write` 才删除匹配 run 记录和 run 目录；支持 `--json`、`--keep-failed`、`--keep-tag`。
 
 近期建议优先级：
 
-1. Git/hostname/username 采集状态显式化。Git 暂不作为当前优先项，hostname/username 可先做轻量状态字段。
-2. 评估是否需要展示层状态 `success_with_warnings`，用于表达命令成功但记录链路存在诊断警告。
-3. 再评估是否需要抽出 `internal/runner`。只有当调度、daemon 或 submit/start/cancel 开始实现时，才把运行编排从 `internal/cli/run.go` 迁入新的 runner 层。
+1. Git 采集状态显式化（hostname/username 已显式化完成；`hostname_status`/`username_status` 取值 `ok|unavailable`，与 `conda_status`/`resource_status` 同模式）。
+2. 域函数从 `internal/cli/run.go` 移入 `internal/capture.go`（Step A，纯搬家，零行为变更；为后续拆 `internal/runner` 铺路）。
+3. 调度 Phase 1 启动时拆 A/B、建 `internal/runner`（Step B，需先拍板"CWD 何时确定 / env 何时冻结"等语义问题；不做抢跑）。
+
+已完成：是否需要抽出 `internal/runner` 已完成评估，结论分两步走。
+当前 `executeRun`（`internal/cli/run.go:122-411`）是一个 290 行单体函数，混合了"准备 run 记录"和"真正执行"两段语义，调度 Phase 1 必须在"打开 DB、写 running 记录"那一行切开成 A/B。直接现在切 A/B 会强行把"CWD 何时检测 / env 何时冻结"等尚未拍板的产品问题提前暴露，属于提前抽象。因此拆 `internal/runner`（Step B）暂不做，与调度 Phase 1 同步启动。但当前可以零成本做 Step A：`detectCWD` / `findScriptArg` / `isTextFile` / `hostname` / `username` 五个域函数被卡在 `cli` 包里，阻碍 `internal/` 单测和未来 `runner` 复用，把它们移入 `internal/capture.go` 是纯搬家、不改任何行为。
 
 已完成：Web 启动语义已收紧，显式 `--port` 被占用时会直接失败；未显式指定端口时才保留自动寻找后续端口。Web processes/logs API 已返回 `process_source`、`activity_sampled`、`last_log_status` 和 logs `status`，避免把降级状态伪装成空值。
 
 已完成：Conda 状态已进入 run 审计链路。`brun run` 会记录 `conda_status=ok|partial|not_detected`、`conda_env`、`conda_prefix` 和 `python_version`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail。
 
 已完成：资源采样能力已显式化。`brun run` 会记录 `resource_supported` 和 `resource_status=ok|unavailable|unsupported`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail，避免把“不支持采样”显示成真实 0。
+
+已完成：运行控制入口已统一为 `brun stop <run_id>`。终止采用两阶段：先发 SIGTERM，等待最多 3 秒宽限期，进程仍未退出再发 SIGKILL；支持 `--force` 跳过宽限期，支持 `--latest` 选择器，作用于整个进程组（含子进程）。终止路径已收敛到 `cmd.StopRun()`，CLI `brun stop` 和 Web kill 共享同一条代码路径，Web 侧改为等待进程真正退出再返回。终止后状态自动置为 `failed`，并保留最近一次资源采样。
+
+已完成：hostname/username 采集状态已显式化。`brun run` 启动时尝试 `os.Hostname()` 和 `USER` 环境变量：成功写入 `hostname_status=ok`/`username_status=ok`，失败或为空时写入 `unavailable`。字段已并入 SQLite schema（version 6 迁移加 `hostname_status` / `username_status` 两列）、`metadata.yaml`、`brun show --json` / `brun list --json` 输出和 Web detail。`brun repair` 从 `metadata.yaml` 重建索引时也会带回这两个状态。
+
+已完成：展示层状态 `success_with_warnings` 已落地。`Run.DisplayStatus()` 在 `Status=success` 且 `DiagWarningCount>0` 时返回 `success_with_warnings`，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都新增 `display_status` 字段；`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。CLI 列表列宽相应放宽，show 在 `Status` 之后多一行 `Display Status`。
 
 ## 中长期：任务调度与依赖运行
 
