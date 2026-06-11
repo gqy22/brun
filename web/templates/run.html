@@ -57,8 +57,14 @@
                     <div class="summary-label">Run ID</div>
                     <code class="run-summary-id" x-text="detail.id"></code>
                   </div>
-                  <span :class="'badge badge-'+(detail.status||'unknown')" x-text="detail.status"></span>
+                  <span :class="'badge badge-'+(detail.display_status || detail.status || 'unknown')" :title="detail.display_status && detail.display_status !== detail.status ? 'status: ' + detail.status : ''" x-text="detail.display_status || detail.status"></span>
                 </div>
+                <template x-if="detail.display_status && detail.display_status !== detail.status">
+                  <div class="side-info side-info-soft">
+                    <label>Display Status</label>
+                    <div class="side-value side-value-mono" x-text="detail.display_status"></div>
+                  </div>
+                </template>
                 <div class="summary-metrics">
                   <div class="summary-metric summary-metric-primary">
                     <span>Duration</span>
@@ -143,6 +149,32 @@
                 <label>Ended</label>
                 <div class="side-value" x-text="fmtTime(detail.ended_at) || '-'"></div>
               </div>
+
+              <template x-if="detail.hostname !== undefined || detail.username !== undefined || detail.hostname_status || detail.username_status">
+                <div>
+                  <div class="side-group-title">环境信息</div>
+                  <div class="side-info">
+                    <label>Hostname</label>
+                    <div class="side-value">
+                      <code x-text="detail.hostname || '-'"></code>
+                      <template x-if="detail.hostname_status">
+                        <span class="env-status" :class="'env-status-'+(detail.hostname_status||'').replace(/[^a-z0-9_-]/gi,'')"
+                              :title="'hostname 采集状态: ' + detail.hostname_status" x-text="detail.hostname_status"></span>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="side-info">
+                    <label>Username</label>
+                    <div class="side-value">
+                      <code x-text="detail.username || '-'"></code>
+                      <template x-if="detail.username_status">
+                        <span class="env-status" :class="'env-status-'+(detail.username_status||'').replace(/[^a-z0-9_-]/gi,'')"
+                              :title="'username 采集状态: ' + detail.username_status" x-text="detail.username_status"></span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
 
               <template x-if="detail.status==='running' && (processSummary.root_pid || processSummary.last_log_update_ago || processSummary.active_count > 0)">
                 <div>

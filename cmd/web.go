@@ -110,6 +110,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 	internal.Log().Info("api_request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 	project := r.URL.Query().Get("project")
 	status := r.URL.Query().Get("status")
+	displayStatus := r.URL.Query().Get("display_status")
 	tag := r.URL.Query().Get("tag")
 	search := r.URL.Query().Get("search")
 	limitStr := r.URL.Query().Get("limit")
@@ -120,7 +121,24 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	runs, err := s.store.ListRuns(limit, project, status, tag, search, "", "")
+	// display_status=success_with_warnings 等：翻译成 status + diag_warning_count>0 的 DB 过滤。
+	withWarnings := false
+	if displayStatus != "" {
+		switch displayStatus {
+		case "success_with_warnings", "failed_with_warnings", "cancelled_with_warnings":
+			withWarnings = true
+			if status == "" {
+				status = strings.TrimSuffix(displayStatus, "_with_warnings")
+			}
+		default:
+			// 未知值按字面 status 处理（与原行为兼容）
+			if status == "" {
+				status = displayStatus
+			}
+		}
+	}
+
+	runs, err := s.store.ListRuns(limit, project, status, tag, search, "", "", withWarnings)
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -551,7 +569,7 @@ func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {
-	runs, err := s.store.ListRuns(1000, "", "", "", "", "", "")
+	runs, err := s.store.ListRuns(1000, "", "", "", "", "", "", false)
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -568,7 +586,7 @@ func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) apiTags(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "")
+	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "", false)
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -703,7 +721,7 @@ func (s *WebServer) healthCheckLoop(interval time.Duration) {
 }
 
 func (s *WebServer) checkRunningTasks() {
-	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "")
+	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "", false)
 	if err != nil {
 		internal.Log().Error("health_check_query_failed", "error", err.Error())
 		return

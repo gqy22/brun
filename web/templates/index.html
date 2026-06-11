@@ -38,7 +38,10 @@
         <option value="">所有状态</option>
         <option value="running">运行中</option>
         <option value="success">成功</option>
+        <option value="success_with_warnings">成功（带警告）</option>
         <option value="failed">失败</option>
+        <option value="failed_with_warnings">失败（带警告）</option>
+        <option value="cancelled">已取消</option>
       </select>
       <select x-model="filters.tag" @change="loadRuns()">
         <option value="">所有标签</option>
@@ -66,7 +69,7 @@
           </template>
           <!-- 数据行 -->
           <template x-for="(r, i) in runs" :key="r.id">
-            <tr :class="'row-clickable animate-in row-status-'+r.status" :style="'animation-delay:' + (i * 35) + 'ms'"
+            <tr :class="'row-clickable animate-in row-status-'+(r.display_status || r.status)" :style="'animation-delay:' + (i * 35) + 'ms'"
                 @click="location.href='/run/'+r.id">
               <td>
                 <div class="run-cell">
@@ -79,7 +82,7 @@
               </td>
 	              <td>
 	                <div class="status-with-diag">
-	                  <span :class="'badge badge-'+r.status" x-text="r.status"></span>
+	                  <span :class="'badge badge-'+(r.display_status || r.status)" :title="r.display_status && r.display_status !== r.status ? 'status: ' + r.status : ''" x-text="r.display_status || r.status"></span>
 	                  <template x-if="diagLabel(r)">
 	                    <span class="diag-pill" :title="diagTitle(r)" x-text="diagLabel(r)"></span>
 	                  </template>
@@ -107,14 +110,14 @@
     <!-- 移动端：卡片列表 -->
     <div class="run-card-list">
       <template x-for="r in runs" :key="r.id">
-        <div :class="'run-card animate-in row-status-'+r.status" @click="location.href='/run/'+r.id">
+        <div :class="'run-card animate-in row-status-'+(r.display_status || r.status)" @click="location.href='/run/'+r.id">
           <div class="run-card-header">
             <div>
               <div class="run-card-title" x-text="r.name || truncate(r.command, 48)"></div>
               <span class="run-card-id" x-text="r.id"></span>
             </div>
 	            <div class="status-with-diag">
-	              <span :class="'badge badge-'+r.status" x-text="r.status"></span>
+	              <span :class="'badge badge-'+(r.display_status || r.status)" :title="r.display_status && r.display_status !== r.status ? 'status: ' + r.status : ''" x-text="r.display_status || r.status"></span>
 	              <template x-if="diagLabel(r)">
 	                <span class="diag-pill" :title="diagTitle(r)" x-text="diagLabel(r)"></span>
 	              </template>
@@ -193,7 +196,12 @@
           try {
             const p = new URLSearchParams();
             if (this.filters.project) p.set('project', this.filters.project);
-            if (this.filters.status) p.set('status', this.filters.status);
+            const status = this.filters.status;
+            if (status && status.endsWith('_with_warnings')) {
+              p.set('display_status', status);
+            } else if (status) {
+              p.set('status', status);
+            }
             if (this.filters.tag) p.set('tag', this.filters.tag);
             if (this.filters.search) p.set('search', this.filters.search);
             const resp = await fetch('/api/runs?' + p.toString());

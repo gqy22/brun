@@ -50,6 +50,7 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	ws := NewWebServer(store, "127.0.0.1", 0, os.DirFS("../web/templates"), os.DirFS("../web/static"))
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runs", ws.apiListRuns)
 	mux.HandleFunc("GET /api/runs/{id}", ws.apiGetRun)
 	mux.HandleFunc("GET /api/runs/{id}/logs", ws.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/logs/stream", ws.apiStreamLogs)
@@ -235,6 +236,58 @@ func TestApiGetRun_ReturnsHostnameUsernameStatus(t *testing.T) {
 	if resp["username"] != "user" || resp["username_status"] != "ok" {
 		t.Fatalf("unexpected username metadata: %+v", resp)
 	}
+}
+
+func TestApiListRuns_DisplayStatusFilter(t *testing.T) {
+	srv, runID := newTestServer(t)
+	run, _ := srv.store.GetRun(runID)
+
+	// 加两个 run：一个 success 无 warning，一个 success 有 warning
+	if err := srv.store.UpdateRunStatus(runID, "success", 0, "2026-06-11T00:00:00Z", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.UpdateRunDiagnostics(runID, internal.DiagnosticSummary{WarningCount: 2, LastCode: "x", LastAt: "2026-06-11T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+
+	clean := &internal.Run{ID: "clean-1", Status: "success", StartedAt: "2026-06-11T00:00:00Z", RunDir: "/t", CWD: "/t"}
+	if err := srv.store.CreateRun(clean); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 不带过滤：两个都返回
+	w := srv.doReq("GET", "/api/runs")
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var rows []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(rows))
+	}
+
+	// 2. display_status=success_with_warnings：只命中带 warning 的那个
+	w2 := srv.doReq("GET", "/api/runs?display_status=success_with_warnings")
+	if w2.Code != 200 {
+		t.Fatalf("status = %d, want 200", w2.Code)
+	}
+	var rows2 []map[string]any
+	if err := json.NewDecoder(w2.Body).Decode(&rows2); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows2) != 1 || rows2[0]["id"] != runID {
+		t.Fatalf("expected only warned run, got %+v", rows2)
+	}
+	if rows2[0]["display_status"] != "success_with_warnings" {
+		t.Errorf("display_status = %v, want success_with_warnings", rows2[0]["display_status"])
+	}
+	if rows2[0]["status"] != "success" {
+		t.Errorf("status = %v, want success", rows2[0]["status"])
+	}
+
+	_ = run
 }
 
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body

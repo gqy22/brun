@@ -395,7 +395,7 @@ func (s *Store) UpdateRunDiagnostics(id string, summary DiagnosticSummary) error
 	)
 }
 
-func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string) ([]*Run, error) {
+func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string, withWarnings bool) ([]*Run, error) {
 	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
 	args := []any{}
 
@@ -406,6 +406,9 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 	if status != "" {
 		q += " AND status=?"
 		args = append(args, status)
+	}
+	if withWarnings {
+		q += " AND diag_warning_count>0"
 	}
 	if tag != "" {
 		q += ` AND id IN (SELECT run_id FROM tags WHERE tag=?)`
@@ -452,7 +455,7 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 }
 
 func (s *Store) GetLatestRun() (*Run, error) {
-	rows, err := s.ListRuns(1, "", "", "", "", "", "")
+	rows, err := s.ListRuns(1, "", "", "", "", "", "", false)
 	if err != nil {
 		return nil, err
 	}

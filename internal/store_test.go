@@ -127,7 +127,7 @@ func TestOpenStoreReadOnlyAllowsQueriesOnly(t *testing.T) {
 	}
 	defer ro.Close()
 
-	runs, err := ro.ListRuns(10, "", "", "", "", "", "")
+	runs, err := ro.ListRuns(10, "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -231,7 +231,7 @@ func TestStore_ListRuns(t *testing.T) {
 		})
 	}
 
-	runs, err := s.ListRuns(10, "", "", "", "", "", "")
+	runs, err := s.ListRuns(10, "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -248,7 +248,7 @@ func TestStore_ListRuns_FilterByProject(t *testing.T) {
 	s.CreateRun(&Run{ID: "p1", Project: "alpha", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "p2", Project: "beta", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "alpha", "", "", "", "", "")
+	runs, _ := s.ListRuns(10, "alpha", "", "", "", "", "", false)
 	if len(runs) != 1 || runs[0].ID != "p1" {
 		t.Errorf("filter by project failed, got %d runs", len(runs))
 	}
@@ -262,9 +262,42 @@ func TestStore_ListRuns_FilterByStatus(t *testing.T) {
 	s.CreateRun(&Run{ID: "s1", Project: "p", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "f1", Project: "p", Command: "c", Status: "failed", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "", "failed", "", "", "", "")
+	runs, _ := s.ListRuns(10, "", "failed", "", "", "", "", false)
 	if len(runs) != 1 || runs[0].ID != "f1" {
 		t.Errorf("filter by status failed")
+	}
+}
+
+func TestStore_ListRuns_FilterByWithWarnings(t *testing.T) {
+	s := newTestStore(t)
+	defer s.Close()
+
+	now := ts()
+	s.CreateRun(&Run{ID: "clean", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
+	s.CreateRun(&Run{ID: "warned", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
+	if err := s.UpdateRunDiagnostics("warned", DiagnosticSummary{WarningCount: 1, LastCode: "x", LastAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	// withWarnings=true 命中所有 diag_warning_count>0
+	all, err := s.ListRuns(10, "", "", "", "", "", "", true)
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(all) != 1 || all[0].ID != "warned" {
+		t.Fatalf("withWarnings filter failed, got %+v", all)
+	}
+	if all[0].DisplayStatus() != "success_with_warnings" {
+		t.Errorf("DisplayStatus = %q, want success_with_warnings", all[0].DisplayStatus())
+	}
+
+	// withWarnings=true 与 status 过滤组合
+	byStatus, err := s.ListRuns(10, "", "success", "", "", "", "", true)
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(byStatus) != 1 || byStatus[0].ID != "warned" {
+		t.Fatalf("withWarnings+status filter failed, got %+v", byStatus)
 	}
 }
 

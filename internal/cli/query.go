@@ -45,7 +45,7 @@ func listCmd() *cobra.Command {
 				}
 			}
 
-			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal)
+			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal, false)
 			if err != nil {
 				return err
 			}
