@@ -284,7 +284,7 @@ func cleanCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			runs, err := store.ListRuns(1000, "", "", "", "", "", "", false)
+			runs, err := store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
 			if err != nil {
 				return err
 			}

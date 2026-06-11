@@ -15,7 +15,7 @@ import (
 )
 
 func listCmd() *cobra.Command {
-	var project, status, tag, search, since, until string
+	var project, status, tag, search, since, until, host, user string
 	var limit int
 	var jsonOutput bool
 
@@ -45,7 +45,7 @@ func listCmd() *cobra.Command {
 				}
 			}
 
-			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal, false)
+			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal, false, host, user)
 			if err != nil {
 				return err
 			}
@@ -84,6 +84,8 @@ func listCmd() *cobra.Command {
 	cc.Flags().StringVarP(&search, "search", "s", "", "在命令/名称中搜索关键词")
 	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
 	cc.Flags().StringVar(&until, "until", "", "显示此时间之前的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
+	cc.Flags().StringVar(&host, "host", "", "按 hostname 过滤 (精确匹配)")
+	cc.Flags().StringVar(&user, "user", "", "按 username 过滤 (精确匹配)")
 	cc.Flags().IntVar(&limit, "limit", 20, "限制数量")
 	cc.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
 	return cc

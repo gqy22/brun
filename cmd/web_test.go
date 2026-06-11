@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +57,8 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	mux.HandleFunc("GET /api/runs/{id}/logs", ws.apiGetLogs)
 	mux.HandleFunc("GET /api/runs/{id}/logs/stream", ws.apiStreamLogs)
 	mux.HandleFunc("GET /api/runs/{id}/processes", ws.apiGetProcesses)
+	mux.HandleFunc("GET /api/hosts", ws.apiHosts)
+	mux.HandleFunc("GET /api/users", ws.apiUsers)
 
 	// 启动真实 HTTP server（用于 SSE 长连接测试）
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -288,6 +292,111 @@ func TestApiListRuns_DisplayStatusFilter(t *testing.T) {
 	}
 
 	_ = run
+}
+
+func TestApiListRuns_HostAndUserFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// 覆盖默认 run + 加三个
+	for _, id := range []string{"a", "b", "c"} {
+		run := &internal.Run{ID: id, Status: "success", StartedAt: "2026-06-11T00:00:00Z", RunDir: "/t", CWD: "/t"}
+		if id == "a" {
+			run.Hostname = "devbox"
+			run.Username = "alice"
+		} else if id == "b" {
+			run.Hostname = "devbox"
+			run.Username = "bob"
+		} else {
+			run.Hostname = "build"
+			run.Username = "alice"
+		}
+		if err := srv.store.CreateRun(run); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name     string
+		query    string
+		wantIDs  []string
+	}{
+		{"no filter", "", []string{"a", "b", "c", "test-run-001"}},
+		{"host=devbox", "?host=devbox", []string{"a", "b"}},
+		{"user=alice", "?user=alice", []string{"a", "c"}},
+		{"host=devbox&user=alice", "?host=devbox&user=alice", []string{"a"}},
+		{"host=unknown", "?host=ghost", []string{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := srv.doReq("GET", "/api/runs"+tc.query)
+			if w.Code != 200 {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+			var rows []map[string]any
+			if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+				t.Fatal(err)
+			}
+			gotIDs := make([]string, 0, len(rows))
+			for _, r := range rows {
+				if id, ok := r["id"].(string); ok {
+					gotIDs = append(gotIDs, id)
+				}
+			}
+			sort.Strings(gotIDs)
+			wantSorted := tc.wantIDs
+			if wantSorted == nil {
+				wantSorted = []string{}
+			} else {
+				wantSorted = append([]string{}, tc.wantIDs...)
+				sort.Strings(wantSorted)
+			}
+			if !reflect.DeepEqual(gotIDs, wantSorted) {
+				t.Errorf("ids = %v, want %v", gotIDs, tc.wantIDs)
+			}
+		})
+	}
+}
+
+func TestApiHostsAndUsers(t *testing.T) {
+	srv, _ := newTestServer(t)
+	run := &internal.Run{ID: "ha", Status: "success", Hostname: "devbox", Username: "alice", StartedAt: "2026-06-11T00:00:00Z", RunDir: "/t", CWD: "/t"}
+	if err := srv.store.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+	run2 := &internal.Run{ID: "hb", Status: "success", Hostname: "build", Username: "bob", StartedAt: "2026-06-11T00:00:01Z", RunDir: "/t", CWD: "/t"}
+	if err := srv.store.CreateRun(run2); err != nil {
+		t.Fatal(err)
+	}
+
+	w := srv.doReq("GET", "/api/hosts")
+	var hosts []string
+	if err := json.NewDecoder(w.Body).Decode(&hosts); err != nil {
+		t.Fatal(err)
+	}
+	wantHosts := map[string]bool{"devbox": true, "build": true}
+	if len(hosts) != 2 {
+		t.Errorf("hosts = %v, want 2 entries", hosts)
+	}
+	for _, h := range hosts {
+		if !wantHosts[h] {
+			t.Errorf("unexpected host %q", h)
+		}
+	}
+
+	w2 := srv.doReq("GET", "/api/users")
+	var users []string
+	if err := json.NewDecoder(w2.Body).Decode(&users); err != nil {
+		t.Fatal(err)
+	}
+	wantUsers := map[string]bool{"alice": true, "bob": true}
+	if len(users) != 2 {
+		t.Errorf("users = %v, want 2 entries", users)
+	}
+	for _, u := range users {
+		if !wantUsers[u] {
+			t.Errorf("unexpected user %q", u)
+		}
+	}
 }
 
 // fetchSSE 通过真实 HTTP 连接请求 SSE 端点，返回完整响应 body

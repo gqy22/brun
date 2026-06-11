@@ -47,6 +47,16 @@
         <option value="">所有标签</option>
         <template x-for="t in tags"><option :value="t" x-text="t"></option></template>
       </select>
+      <input type="text" x-model="filters.host" @input.debounce.300ms="loadRuns()"
+             list="host-suggestions" placeholder="hostname" class="filter-input filter-input-sm">
+      <datalist id="host-suggestions">
+        <template x-for="h in hosts"><option :value="h"></option></template>
+      </datalist>
+      <input type="text" x-model="filters.user" @input.debounce.300ms="loadRuns()"
+             list="user-suggestions" placeholder="username" class="filter-input filter-input-sm">
+      <datalist id="user-suggestions">
+        <template x-for="u in users"><option :value="u"></option></template>
+      </datalist>
       <button x-show="activeFilterCount > 0" @click="clearFilters()" class="btn btn-sm btn-subtle">清除筛选</button>
       <button @click="doRefresh()" class="btn btn-sm btn-outline"
               :class="{'btn-spinning': refreshing}">
@@ -160,9 +170,11 @@
       return {
         loading: true,
         refreshing: false,
-        filters: { project: '', status: '', tag: '', search: '' },
+        filters: { project: '', status: '', tag: '', search: '', host: '', user: '' },
         projects: [],
         tags: [],
+        hosts: [],
+        users: [],
         runs: [],
         stats: { total: null, rate: 0, todayCount: 0, running: 0, failed: 0 },
         _runningTimers: {},
@@ -178,17 +190,23 @@
           return (this.filters.project ? 1 : 0) +
             (this.filters.status ? 1 : 0) +
             (this.filters.tag ? 1 : 0) +
-            (this.filters.search ? 1 : 0);
+            (this.filters.search ? 1 : 0) +
+            (this.filters.host ? 1 : 0) +
+            (this.filters.user ? 1 : 0);
         },
 
         async loadFilters() {
           try {
-            const [pj, tg] = await Promise.all([
+            const [pj, tg, hs, us] = await Promise.all([
               fetch('/api/projects').then(r => r.json()),
               fetch('/api/tags').then(r => r.json()),
+              fetch('/api/hosts').then(r => r.json()),
+              fetch('/api/users').then(r => r.json()),
             ]);
             this.projects = pj;
             this.tags = tg;
+            this.hosts = hs;
+            this.users = us;
           } catch (e) { console.error('loadFilters:', e); }
         },
 
@@ -204,6 +222,8 @@
             }
             if (this.filters.tag) p.set('tag', this.filters.tag);
             if (this.filters.search) p.set('search', this.filters.search);
+            if (this.filters.host) p.set('host', this.filters.host);
+            if (this.filters.user) p.set('user', this.filters.user);
             const resp = await fetch('/api/runs?' + p.toString());
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             this.runs = await resp.json();
@@ -223,7 +243,7 @@
         },
 
         clearFilters() {
-          this.filters = { project: '', status: '', tag: '', search: '' };
+          this.filters = { project: '', status: '', tag: '', search: '', host: '', user: '' };
           this.loadRuns();
         },
 

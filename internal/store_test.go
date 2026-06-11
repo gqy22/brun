@@ -127,7 +127,7 @@ func TestOpenStoreReadOnlyAllowsQueriesOnly(t *testing.T) {
 	}
 	defer ro.Close()
 
-	runs, err := ro.ListRuns(10, "", "", "", "", "", "", false)
+	runs, err := ro.ListRuns(10, "", "", "", "", "", "", false, "", "")
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -278,7 +278,7 @@ func TestStore_ListRuns(t *testing.T) {
 		})
 	}
 
-	runs, err := s.ListRuns(10, "", "", "", "", "", "", false)
+	runs, err := s.ListRuns(10, "", "", "", "", "", "", false, "", "")
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestStore_ListRuns_FilterByProject(t *testing.T) {
 	s.CreateRun(&Run{ID: "p1", Project: "alpha", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "p2", Project: "beta", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "alpha", "", "", "", "", "", false)
+	runs, _ := s.ListRuns(10, "alpha", "", "", "", "", "", false, "", "")
 	if len(runs) != 1 || runs[0].ID != "p1" {
 		t.Errorf("filter by project failed, got %d runs", len(runs))
 	}
@@ -309,9 +309,43 @@ func TestStore_ListRuns_FilterByStatus(t *testing.T) {
 	s.CreateRun(&Run{ID: "s1", Project: "p", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
 	s.CreateRun(&Run{ID: "f1", Project: "p", Command: "c", Status: "failed", StartedAt: now, RunDir: "/t", CWD: "/t"})
 
-	runs, _ := s.ListRuns(10, "", "failed", "", "", "", "", false)
+	runs, _ := s.ListRuns(10, "", "failed", "", "", "", "", false, "", "")
 	if len(runs) != 1 || runs[0].ID != "f1" {
 		t.Errorf("filter by status failed")
+	}
+}
+
+func TestStore_ListRuns_FilterByHostAndUser(t *testing.T) {
+	s := newTestStore(t)
+	defer s.Close()
+
+	now := ts()
+	s.CreateRun(&Run{ID: "devbox-alice", Hostname: "devbox", Username: "alice", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
+	s.CreateRun(&Run{ID: "devbox-bob", Hostname: "devbox", Username: "bob", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
+	s.CreateRun(&Run{ID: "build-alice", Hostname: "build", Username: "alice", Command: "c", Status: "success", StartedAt: now, RunDir: "/t", CWD: "/t"})
+
+	// 仅 host
+	byHost, _ := s.ListRuns(10, "", "", "", "", "", "", false, "devbox", "")
+	if len(byHost) != 2 {
+		t.Errorf("by host: got %d runs, want 2", len(byHost))
+	}
+
+	// 仅 user
+	byUser, _ := s.ListRuns(10, "", "", "", "", "", "", false, "", "alice")
+	if len(byUser) != 2 {
+		t.Errorf("by user: got %d runs, want 2", len(byUser))
+	}
+
+	// host + user
+	both, _ := s.ListRuns(10, "", "", "", "", "", "", false, "devbox", "alice")
+	if len(both) != 1 || both[0].ID != "devbox-alice" {
+		t.Errorf("by host+user: got %+v, want devbox-alice", both)
+	}
+
+	// 组合其它过滤（host + status）
+	withStatus, _ := s.ListRuns(10, "", "success", "", "", "", "", false, "build", "alice")
+	if len(withStatus) != 1 || withStatus[0].ID != "build-alice" {
+		t.Errorf("by host+user+status: got %+v, want build-alice", withStatus)
 	}
 }
 
@@ -327,7 +361,7 @@ func TestStore_ListRuns_FilterByWithWarnings(t *testing.T) {
 	}
 
 	// withWarnings=true 命中所有 diag_warning_count>0
-	all, err := s.ListRuns(10, "", "", "", "", "", "", true)
+	all, err := s.ListRuns(10, "", "", "", "", "", "", true, "", "")
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -339,7 +373,7 @@ func TestStore_ListRuns_FilterByWithWarnings(t *testing.T) {
 	}
 
 	// withWarnings=true 与 status 过滤组合
-	byStatus, err := s.ListRuns(10, "", "success", "", "", "", "", true)
+	byStatus, err := s.ListRuns(10, "", "success", "", "", "", "", true, "", "")
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}

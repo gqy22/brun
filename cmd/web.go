@@ -73,6 +73,8 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("DELETE /api/runs/{id}", s.apiDeleteRun)
 	mux.HandleFunc("GET /api/projects", s.apiProjects)
 	mux.HandleFunc("GET /api/tags", s.apiTags)
+	mux.HandleFunc("GET /api/hosts", s.apiHosts)
+	mux.HandleFunc("GET /api/users", s.apiUsers)
 
 	// Page routes (catch-all last)
 	mux.HandleFunc("GET /", s.pageIndex)
@@ -113,6 +115,8 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 	displayStatus := r.URL.Query().Get("display_status")
 	tag := r.URL.Query().Get("tag")
 	search := r.URL.Query().Get("search")
+	host := r.URL.Query().Get("host")
+	user := r.URL.Query().Get("user")
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50
 	if limitStr != "" {
@@ -138,7 +142,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	runs, err := s.store.ListRuns(limit, project, status, tag, search, "", "", withWarnings)
+	runs, err := s.store.ListRuns(limit, project, status, tag, search, "", "", withWarnings, host, user)
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -569,7 +573,7 @@ func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {
-	runs, err := s.store.ListRuns(1000, "", "", "", "", "", "", false)
+	runs, err := s.store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -586,7 +590,7 @@ func (s *WebServer) apiProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) apiTags(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "", false)
+	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
 	if err != nil {
 		httpError(w, err.Error(), 500)
 		return
@@ -603,6 +607,52 @@ func (s *WebServer) apiTags(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jsonResponse(w, tags)
+}
+
+// apiHosts 列出所有出现过的 hostname（含空值跳过），用于 Web 端 host 过滤的 datalist 建议。
+func (s *WebServer) apiHosts(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
+	if err != nil {
+		httpError(w, err.Error(), 500)
+		return
+	}
+	seen := make(map[string]bool)
+	var hosts []string
+	for _, run := range rows {
+		if run.Hostname != "" && !seen[run.Hostname] {
+			seen[run.Hostname] = true
+			hosts = append(hosts, run.Hostname)
+		}
+	}
+	sortStrings(hosts)
+	jsonResponse(w, hosts)
+}
+
+// apiUsers 列出所有出现过的 username，用于 Web 端 user 过滤的 datalist 建议。
+func (s *WebServer) apiUsers(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
+	if err != nil {
+		httpError(w, err.Error(), 500)
+		return
+	}
+	seen := make(map[string]bool)
+	var users []string
+	for _, run := range rows {
+		if run.Username != "" && !seen[run.Username] {
+			seen[run.Username] = true
+			users = append(users, run.Username)
+		}
+	}
+	sortStrings(users)
+	jsonResponse(w, users)
+}
+
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
 }
 
 // --- Page handlers ---
@@ -721,7 +771,7 @@ func (s *WebServer) healthCheckLoop(interval time.Duration) {
 }
 
 func (s *WebServer) checkRunningTasks() {
-	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "", false)
+	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "", false, "", "")
 	if err != nil {
 		internal.Log().Error("health_check_query_failed", "error", err.Error())
 		return
