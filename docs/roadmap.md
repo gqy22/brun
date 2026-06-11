@@ -112,7 +112,7 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：hostname/username 采集状态已显式化。`brun run` 启动时尝试 `os.Hostname()` 和 `USER` 环境变量：成功写入 `hostname_status=ok`/`username_status=ok`，失败或为空时写入 `unavailable`。字段已并入 SQLite schema（version 6 迁移加 `hostname_status` / `username_status` 两列）、`metadata.yaml`、`brun show --json` / `brun list --json` 输出和 Web detail。`brun repair` 从 `metadata.yaml` 重建索引时也会带回这两个状态。
 
-已完成：展示层状态 `success_with_warnings` 已落地。`Run.DisplayStatus()` 在 `Status=success` 且 `DiagWarningCount>0` 时返回 `success_with_warnings`，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都新增 `display_status` 字段；`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。CLI 列表列宽相应放宽，show 在 `Status` 之后多一行 `Display Status`。
+已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` 已落地。`Run.DisplayStatus()` 在 `DiagWarningCount>0` 且基础状态为 `success/failed/cancelled` 时分别返回三种 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选下拉新增 `failed_with_warnings` 和 `cancelled_with_warnings` 选项，行色与徽标用 `*_with_warnings` CSS 变体高亮。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。
 
 ## 中长期：任务调度与依赖运行
 

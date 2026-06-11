@@ -136,15 +136,23 @@ func configureDB(db *sql.DB) {
 func (s *Store) Close() error { return s.db.Close() }
 
 // DisplayStatus 返回面向展示层的状态字符串。基础状态与 Status 一致，
-// 但当命令成功且诊断链路记录了 warning 时，会返回 success_with_warnings，
-// 用于在 list/show/Web 中显式表达"命令成功但记录链路存在警告"。
-// 字段 `status` 保持原值不变，保证按状态过滤的 agent 工具不被打乱。
+// 但当命令以 success/failed/cancelled 收尾、且诊断链路记录了 warning 时，
+// 会分别返回 *_with_warnings 变体，用于在 list/show/Web 中显式表达
+// "命令收尾但记录链路存在警告"。字段 `status` 保持原值不变，保证按状态
+// 过滤的 agent 工具不被打乱。
 func (r *Run) DisplayStatus() string {
 	if r == nil {
 		return ""
 	}
-	if r.Status == "success" && r.DiagWarningCount > 0 {
-		return "success_with_warnings"
+	if r.DiagWarningCount > 0 {
+		switch r.Status {
+		case "success":
+			return "success_with_warnings"
+		case "failed":
+			return "failed_with_warnings"
+		case "cancelled":
+			return "cancelled_with_warnings"
+		}
 	}
 	return r.Status
 }

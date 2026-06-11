@@ -294,6 +294,55 @@ func TestApiListRuns_DisplayStatusFilter(t *testing.T) {
 	_ = run
 }
 
+func TestApiListRuns_DisplayStatusFilter_FailedAndCancelled(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// 准备三种状态的 run，每种都带一个 warning，让 DisplayStatus 切到 _with_warnings 变体
+	failed := &internal.Run{ID: "fw1", Status: "failed", StartedAt: "2026-06-11T00:00:00Z", RunDir: "/t", CWD: "/t", DiagWarningCount: 1}
+	if err := srv.store.CreateRun(failed); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := &internal.Run{ID: "cw1", Status: "cancelled", StartedAt: "2026-06-11T00:00:01Z", RunDir: "/t", CWD: "/t", DiagWarningCount: 2}
+	if err := srv.store.CreateRun(cancelled); err != nil {
+		t.Fatal(err)
+	}
+	plain := &internal.Run{ID: "plain1", Status: "failed", StartedAt: "2026-06-11T00:00:02Z", RunDir: "/t", CWD: "/t"}
+	if err := srv.store.CreateRun(plain); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		query    string
+		wantID   string
+		wantDS   string
+	}{
+		{"failed_with_warnings", "?display_status=failed_with_warnings", "fw1", "failed_with_warnings"},
+		{"cancelled_with_warnings", "?display_status=cancelled_with_warnings", "cw1", "cancelled_with_warnings"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := srv.doReq("GET", "/api/runs"+tc.query)
+			if w.Code != 200 {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+			var rows []map[string]any
+			if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("expected 1 row, got %d (%+v)", len(rows), rows)
+			}
+			if rows[0]["id"] != tc.wantID {
+				t.Errorf("id = %v, want %v", rows[0]["id"], tc.wantID)
+			}
+			if rows[0]["display_status"] != tc.wantDS {
+				t.Errorf("display_status = %v, want %v", rows[0]["display_status"], tc.wantDS)
+			}
+		})
+	}
+}
+
 func TestApiListRuns_HostAndUserFilter(t *testing.T) {
 	srv, _ := newTestServer(t)
 

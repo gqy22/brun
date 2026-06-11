@@ -94,8 +94,11 @@ func TestRun_DisplayStatus(t *testing.T) {
 		{"success no warning", "success", 0, "success"},
 		{"success with warning", "success", 2, "success_with_warnings"},
 		{"failed no warning", "failed", 0, "failed"},
-		{"failed with warning", "failed", 1, "failed"},
+		{"failed with warning", "failed", 1, "failed_with_warnings"},
+		{"cancelled no warning", "cancelled", 0, "cancelled"},
+		{"cancelled with warning", "cancelled", 3, "cancelled_with_warnings"},
 		{"running", "running", 0, "running"},
+		{"running with warning", "running", 1, "running"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
