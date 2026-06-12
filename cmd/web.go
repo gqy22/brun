@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -267,7 +268,7 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 		logPath = filepath.Join(run.RunDir, "stdout.o")
 	}
 
-	data, err := os.ReadFile(logPath)
+	fileSize, data, err := readLogFromOffset(logPath, int64(offset))
 	if err != nil {
 		status := "unreadable"
 		if os.IsNotExist(err) {
@@ -282,19 +283,14 @@ func (s *WebServer) apiGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileSize := len(data)
-
-	if offset > 0 {
-		if offset >= fileSize {
-			jsonResponse(w, map[string]any{
-				"content": "",
-				"stream":  stream,
-				"status":  "ok",
-				"size":    fileSize,
-			})
-			return
-		}
-		data = data[offset:]
+	if offset > 0 && int64(offset) >= fileSize {
+		jsonResponse(w, map[string]any{
+			"content": "",
+			"stream":  stream,
+			"status":  "ok",
+			"size":    fileSize,
+		})
+		return
 	}
 
 	content := string(data)
@@ -348,11 +344,12 @@ func (s *WebServer) apiStreamLogs(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	data, readErr := os.ReadFile(logPath)
+	fileSize, data, readErr := readLogFromOffset(logPath, 0)
 	if readErr != nil {
 		data = []byte{}
+		fileSize = 0
 	}
-	prevSize := len(data)
+	prevSize := fileSize
 
 	sendSSE(map[string]any{
 		"content": string(data),
@@ -376,16 +373,16 @@ func (s *WebServer) apiStreamLogs(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			data, readErr = os.ReadFile(logPath)
+			fileSize, data, readErr = readLogFromOffset(logPath, prevSize)
 			if readErr != nil {
 				continue
 			}
-			if len(data) > prevSize {
+			if len(data) > 0 {
 				sendSSE(map[string]any{
-					"content": string(data[prevSize:]),
-					"size":    len(data),
+					"content": string(data),
+					"size":    fileSize,
 				})
-				prevSize = len(data)
+				prevSize = fileSize
 			}
 		}
 	}
@@ -463,8 +460,7 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmdParts := strings.Fields(run.Command)
-	if len(cmdParts) == 0 {
+	if strings.TrimSpace(run.Command) == "" {
 		httpError(w, "no command to rerun", 400)
 		return
 	}
@@ -497,7 +493,7 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 	// 后台执行完整流程
 	go func() {
 		sigCh := make(chan os.Signal, 1)
-		result := ExecuteCommandWithSignal(cmdParts, run.CWD, stdoutPath, stderrPath, 0, sigCh)
+		result := ExecuteCommandWithSignal(ShellCommandArgs(run.Command), run.CWD, stdoutPath, stderrPath, 0, sigCh)
 		s.store.UpdateRunStatus(newID, result.Status, result.ExitCode, result.EndedAt, result.DurationMs)
 		s.store.UpdateRunResources(newID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus)
 	}()
@@ -694,6 +690,34 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+func readLogFromOffset(path string, offset int64) (int64, []byte, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return 0, nil, err
+	}
+	size := info.Size()
+	if offset >= size {
+		return size, []byte{}, nil
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return size, nil, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return size, nil, err
+	}
+	return size, data, nil
 }
 
 // autoRefreshInterval 用于 running 状态的日志轮询间隔（毫秒）

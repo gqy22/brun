@@ -312,10 +312,10 @@ func TestApiListRuns_DisplayStatusFilter_FailedAndCancelled(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		query    string
-		wantID   string
-		wantDS   string
+		name   string
+		query  string
+		wantID string
+		wantDS string
 	}{
 		{"failed_with_warnings", "?display_status=failed_with_warnings", "fw1", "failed_with_warnings"},
 		{"cancelled_with_warnings", "?display_status=cancelled_with_warnings", "cw1", "cancelled_with_warnings"},
@@ -365,9 +365,9 @@ func TestApiListRuns_HostAndUserFilter(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		query    string
-		wantIDs  []string
+		name    string
+		query   string
+		wantIDs []string
 	}{
 		{"no filter", "", []string{"a", "b", "c", "test-run-001"}},
 		{"host=devbox", "?host=devbox", []string{"a", "b"}},
@@ -571,6 +571,25 @@ func TestApiGetLogs_WithTailAndOffset_TailAppliedToIncrement(t *testing.T) {
 
 	if !strings.Contains(content, "line2") {
 		t.Errorf("tail+offset 应返回 line2, got %q", content)
+	}
+}
+
+func TestReadLogFromOffset(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "stdout.o")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	size, data, err := readLogFromOffset(path, 6)
+	if err != nil {
+		t.Fatalf("readLogFromOffset() error = %v", err)
+	}
+	if size != 12 {
+		t.Fatalf("size = %d, want 12", size)
+	}
+	if got := string(data); got != "line2\n" {
+		t.Fatalf("data = %q, want %q", got, "line2\n")
 	}
 }
 

@@ -301,11 +301,6 @@ func executeRun(args []string, name, project, note string, tags []string,
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	go func() {
-		<-sigCh
-		fmt.Printf("\n[信号] 收到中断信号，正在优雅停止...\n")
-	}()
-
 	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh)
 
 	// 11. after 快照 + diff

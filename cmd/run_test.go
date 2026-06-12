@@ -96,6 +96,22 @@ func TestRun_RealtimeOutput(t *testing.T) {
 	}
 }
 
+func TestShellCommandArgsPreservesShellSyntax(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+
+	result := ExecuteCommandWithWriter(
+		ShellCommandArgs(`printf '%s\n' "a b"`),
+		&stdoutBuf, &bytes.Buffer{}, 0,
+	)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if got := stdoutBuf.String(); got != "a b\n" {
+		t.Fatalf("stdout = %q, want %q", got, "a b\n")
+	}
+}
+
 func TestBuildRunRecord(t *testing.T) {
 	runID := "20260513-153012-a8f3c2"
 	record := BuildRunRecord(runID, "test-project", "/work/dir",

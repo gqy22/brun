@@ -208,6 +208,7 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		// 正常完成
 	case <-sigCh:
 		interrupted = true
+		fmt.Printf("\n[信号] 收到中断信号，正在优雅停止...\n")
 		// 收到信号，优雅终止子进程组
 		if cmd.Process.Pid > 0 {
 			KillProcessGroup(cmd.Process.Pid, syscall.SIGTERM)

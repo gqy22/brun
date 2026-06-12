@@ -233,15 +233,13 @@ func rerunCmd() *cobra.Command {
 				return nil
 			}
 
-			// 解析原始命令参数
-			origArgs := strings.Fields(cmdStr)
 			name := rerunName
 			if sameTags {
 				tags, _ := store.GetTags(r.ID)
 				// 继承 tags 到新 run
 				_ = tags
 			}
-			return executeRun(origArgs, name, r.Project, "", nil,
+			return executeRun(cmd.ShellCommandArgs(cmdStr), name, r.Project, "", nil,
 				false, "", 0, execCWD, "")
 		},
 	}
