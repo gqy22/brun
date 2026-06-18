@@ -18,11 +18,8 @@ import (
 
 func tagCmd() *cobra.Command {
 	var latest bool
+	ht := MustParse("tag")
 	c := &cobra.Command{
-		Use:   "tag <run_id> TAG...",
-		Short: "添加标签",
-		Example: `  brun tag 20260605-145615-fed727 sample:S1 production
-  brun tag --latest sample:S1 production`,
 		Args: func(c *cobra.Command, args []string) error {
 			if latest {
 				if len(args) < 1 {
@@ -63,6 +60,7 @@ func tagCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "使用最新运行")
+	ht.Inject(c)
 	return c
 }
 
@@ -70,6 +68,7 @@ func tagCmd() *cobra.Command {
 
 func noteCmd() *cobra.Command {
 	var latest bool
+	ht := MustParse("note")
 	c := &cobra.Command{
 		Use:   "note <run_id> \"text\"",
 		Short: "添加备注",
@@ -113,6 +112,7 @@ func noteCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "使用最新运行")
+	ht.Inject(c)
 	return c
 }
 
@@ -122,14 +122,8 @@ func stopCmd() *cobra.Command {
 	var latest bool
 	var force bool
 
+	ht := MustParse("stop")
 	c := &cobra.Command{
-		Use:   "stop <run_id>",
-		Short: "终止运行中的任务",
-		Long: "向运行中的任务发送终止信号（SIGTERM），等待优雅退出后强制结束（SIGKILL）。\n" +
-			"终止的是整个进程组，包括所有子进程。任务状态会自动更新为 failed。",
-		Example: `  brun stop 20260605-145615-fed727
-  brun stop --latest
-  brun stop --latest --force`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -197,6 +191,7 @@ func stopCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "终止最新运行中的任务")
 	c.Flags().BoolVarP(&force, "force", "f", false, "跳过宽限期直接强制终止 (SIGKILL)")
+	ht.Inject(c)
 	return c
 }
 
@@ -207,12 +202,8 @@ func rerunCmd() *cobra.Command {
 	var dryRun, sameTags, latest bool
 	var rerunName string
 
+	ht := MustParse("rerun")
 	c := &cobra.Command{
-		Use:   "rerun <run_id>",
-		Short: "重新运行",
-		Example: `  brun rerun 20260605-145615-fed727 --dry-run
-  brun rerun --latest --dry-run
-  brun rerun --latest --cwd /data/project`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -248,6 +239,7 @@ func rerunCmd() *cobra.Command {
 	c.Flags().BoolVar(&sameTags, "with-same-tags", false, "继承原 tags")
 	c.Flags().StringVar(&rerunName, "name", "", "指定新 run 名称")
 	c.Flags().BoolVar(&latest, "latest", false, "重新运行最新记录")
+	ht.Inject(c)
 	return c
 }
 
@@ -260,13 +252,8 @@ func cleanCmd() *cobra.Command {
 	var write bool
 	var jsonOut bool
 
+	ht := MustParse("clean")
 	c := &cobra.Command{
-		Use:   "clean --older-than <duration>",
-		Short: "清理旧运行记录",
-		Long:  "清理符合条件的 run 记录和 run 目录。默认只预览，必须显式使用 --write 才会删除。",
-		Example: `  brun clean --older-than 30d
-  brun clean --older-than 30d --keep-failed --json
-  brun clean --older-than 90d --write`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if olderThan == "" {
 				return cliError("missing_clean_filter", "缺少清理条件 --older-than", "例如 brun clean --older-than 30d；默认只预览，实际删除需加 --write", nil)
@@ -347,17 +334,14 @@ func cleanCmd() *cobra.Command {
 	c.Flags().StringVar(&keepTag, "keep-tag", "", "保留指定 tag 的 run")
 	c.Flags().BoolVar(&write, "write", false, "实际删除匹配的 run；不传时只预览")
 	c.Flags().BoolVar(&jsonOut, "json", false, "输出 JSON")
+	ht.Inject(c)
 	return c
 }
 
 func repairCmd() *cobra.Command {
 	var write bool
+	ht := MustParse("repair")
 	c := &cobra.Command{
-		Use:   "repair",
-		Short: "从 run 目录重建 SQLite 索引",
-		Long:  "扫描 runs 目录中的 metadata.yaml，重建 SQLite run 索引。默认只预览，使用 --write 才会写入数据库。",
-		Example: `  brun repair
-  brun repair --write`,
 		RunE: func(c *cobra.Command, args []string) error {
 			runs, err := loadRunsFromMetadata(internal.RunsRoot())
 			if err != nil {
@@ -387,6 +371,7 @@ func repairCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&write, "write", false, "实际写入缺失的 run 记录")
+	ht.Inject(c)
 	return c
 }
 
@@ -501,18 +486,8 @@ func webCmd() *cobra.Command {
 	var port int
 	var addr string
 
+	ht := MustParse("web")
 	c := &cobra.Command{
-		Use:   "web",
-		Short: "启动 Web Dashboard（局域网访问）",
-		Long:  "在本地启动 HTTP 服务，通过浏览器管理运行记录、查看日志。默认监听 0.0.0.0:9213；未显式指定 --port 时会自动避开占用端口，显式指定 --port 时端口不可用会直接报错。",
-		Example: `  # 启动 Web Dashboard
-  brun web
-
-  # 指定端口；如果端口被占用会直接失败
-  brun web --port 9090
-
-  # 明确局域网监听地址
-  brun web --addr 0.0.0.0`,
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -538,6 +513,7 @@ func webCmd() *cobra.Command {
 	}
 	c.Flags().IntVarP(&port, "port", "p", 9213, "监听端口；显式指定时不会自动递增")
 	c.Flags().StringVar(&addr, "addr", "0.0.0.0", "监听地址；默认允许局域网访问")
+	ht.Inject(c)
 	return c
 }
 

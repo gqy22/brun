@@ -18,13 +18,9 @@ import (
 )
 
 func initCmd() *cobra.Command {
-	ex := "  # 生成 01_align.sh\n  brun init align\n\n  # 同名再次生成 → 01_align2.sh\n  brun init align\n\n  # 不同名 → 新编号\n  brun init call          # → 02_call.sh"
-	return &cobra.Command{
-		Use:     "init <名称>",
-		Short:   "在当前目录生成脚本模板",
-		Long:    "生成带标准注释头部的脚本模板。自动检测 conda 环境、计算编号（同名递增后缀）。",
-		Example: ex,
-		Args:    cobra.MaximumNArgs(1),
+	ht := MustParse("init")
+	c := &cobra.Command{
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			name := "script"
 			if len(args) > 0 {
@@ -54,11 +50,11 @@ func initCmd() *cobra.Command {
 			return nil
 		},
 	}
+	ht.Inject(c)
+	return c
 }
-
-// --- run (核心编排) ---
-
 func runCmd() *cobra.Command {
+	ht := MustParse("run")
 	var name, project, note string
 	var tags []string
 	var noFsDiff bool
@@ -116,6 +112,7 @@ func runCmd() *cobra.Command {
 	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
 	c.Flags().StringVar(&runIDFlag, "run-id", "", "内部使用: 指定 run ID")
 	c.Flags().MarkHidden("run-id")
+	ht.Inject(c)
 	return c
 }
 

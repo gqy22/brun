@@ -10,37 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
-
-{{end}}{{if .Example}}
-示例:
-{{.Example}}
-{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
-
-const usageTemplate = `用法: {{.UseLine}}
-
-{{if .HasAvailableSubCommands}}
-可用命令:
-{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}
-{{end}}
-{{if .HasAvailableLocalFlags}}
-选项:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}
-{{if .HasAvailableInheritedFlags}}
-全局选项:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}
-{{if .HasHelpSubCommands}}
-更多帮助命令:
-{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}
-{{end}}
-{{if .HasAvailableSubCommands}}
-使用 "{{.CommandPath}} [命令] --help" 获取更多信息
-{{end}}
-`
+// Template constants defined in helptext.go (helpTemplate, usageTemplate)
 
 type Options struct {
 	Version string
@@ -52,14 +22,6 @@ func Execute(opts Options) error {
 	}
 
 	rootCmd := &cobra.Command{
-		Use:   "brun",
-		Short: "bio-runner: 面向生物信息学的运行记录与日志管理工具",
-		Long: `brun 是一个跨项目运行记录工具。
-通过 brun run -- <command> 包装任意命令，自动记录日志、环境、Git 信息和输出文件。
-也可以使用 brun -- <command> 作为快捷入口，等价于默认后台运行。
-
-默认数据目录为 ~/.brun，可通过 BRUN_HOME 覆盖。
-查询最新 run 使用显式 --latest；位置参数始终按真实 run_id 处理。`,
 		Version:       opts.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -79,6 +41,7 @@ func Execute(opts Options) error {
 			return detachRun(c, args, "", "", "", nil, false, "", 0, "")
 		},
 	}
+	MustParse("root").Inject(rootCmd)
 	rootCmd.SetHelpTemplate(helpTemplate)
 	rootCmd.SetUsageTemplate(usageTemplate)
 

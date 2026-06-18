@@ -19,9 +19,8 @@ func listCmd() *cobra.Command {
 	var limit int
 	var jsonOutput bool
 
+	ht := MustParse("list")
 	cc := &cobra.Command{
-		Use:   "list",
-		Short: "列出运行历史",
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStoreReadOnly()
 			if err != nil {
@@ -88,19 +87,17 @@ func listCmd() *cobra.Command {
 	cc.Flags().StringVar(&user, "user", "", "按 username 过滤 (精确匹配)")
 	cc.Flags().IntVar(&limit, "limit", 20, "限制数量")
 	cc.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
+	ht.Inject(cc)
 	return cc
 }
 
-// --- show ---
+// --- show---
 
 func showCmd() *cobra.Command {
 	var latest bool
 	var jsonOutput bool
+	ht := MustParse("show")
 	c := &cobra.Command{
-		Use:   "show <run_id>",
-		Short: "显示运行详情",
-		Example: `  brun show 20260605-145615-fed727
-  brun show --latest`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -154,6 +151,7 @@ func showCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
+	ht.Inject(c)
 	return c
 }
 
@@ -296,12 +294,8 @@ func scriptCmd() *cobra.Command {
 	var pathOnly bool
 	var latest bool
 
+	ht := MustParse("script")
 	c := &cobra.Command{
-		Use:   "script <run_id>",
-		Short: "查看运行时保存的脚本快照",
-		Example: `  brun script --latest
-  brun script 20260522-153012-a8f3c2
-  brun script --latest --path`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -329,28 +323,19 @@ func scriptCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&pathOnly, "path", false, "只输出脚本快照路径")
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	ht.Inject(c)
 	return c
 }
 
-// --- logs ---
+// --- logs---
 
 func logsCmd() *cobra.Command {
 	var stdoutOnly, stderrOnly bool
 	var tailN int
 	var follow, latest bool
 
+	ht := MustParse("logs")
 	c := &cobra.Command{
-		Use:   "logs <run_id>",
-		Short: "查看运行日志",
-		Long:  "查看运行日志。支持 --follow 实时跟踪输出（类似 tail -f）。",
-		Example: `  # 查看最新运行的日志
-  brun logs --latest
-
-  # 实时跟踪正在运行的命令输出
-  brun logs --latest -f
-
-  # 只看最后 50 行 stderr
-  brun logs <run_id> --stderr --tail 50`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -402,6 +387,7 @@ func logsCmd() *cobra.Command {
 	c.Flags().IntVar(&tailN, "tail", 0, "最后 N 行")
 	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪 (类似 tail -f)")
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
+	ht.Inject(c)
 	return c
 }
 
@@ -481,11 +467,8 @@ func printLogSection(label, path string, tailN int) {
 func outputsCmd() *cobra.Command {
 	var latest bool
 	var jsonOutput bool
+	ht := MustParse("outputs")
 	c := &cobra.Command{
-		Use:   "outputs <run_id>",
-		Short: "查看输出文件",
-		Example: `  brun outputs 20260605-145615-fed727
-  brun outputs --latest`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -537,6 +520,7 @@ func outputsCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
+	ht.Inject(c)
 	return c
 }
 
@@ -575,14 +559,8 @@ func artifactJSONFromInternal(a *internal.Artifact) artifactJSON {
 
 func diagCmd() *cobra.Command {
 	var latest, all, jsonOutput bool
+	ht := MustParse("diag")
 	c := &cobra.Command{
-		Use:   "diag <run_id>",
-		Short: "查看运行诊断",
-		Long:  "查看运行诊断。默认只显示 warning/error；使用 --all 显示 info/warning/error；使用 --json 输出机器可读结果。",
-		Example: `  brun diag 20260605-145615-fed727
-  brun diag --latest
-  brun diag --latest --all
-  brun diag --latest --json`,
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -636,10 +614,11 @@ func diagCmd() *cobra.Command {
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	c.Flags().BoolVar(&all, "all", false, "显示 info/warning/error 全部诊断")
 	c.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON")
+	ht.Inject(c)
 	return c
 }
 
-// --- tag ---
+// --- tag---
 
 func parseTimeFilter(s string) (string, error) {
 	s = strings.TrimSpace(s)

@@ -70,7 +70,9 @@ type ScriptSnapshot struct {
 }
 
 // ReadScriptSnapshot reads the saved input script snapshot from a run directory.
-// Binary files and files larger than 2MB are ignored.
+// It first looks for script.* files (saved when the command invoked a script file like bash align.sh).
+// If none is found, it falls back to reading command.sh which always exists and contains
+// the original command string. Binary files and files larger than 2MB are ignored.
 func ReadScriptSnapshot(runDir string) (ScriptSnapshot, error) {
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
@@ -94,6 +96,18 @@ func ReadScriptSnapshot(runDir string) (ScriptSnapshot, error) {
 			Content: string(data),
 		}, nil
 	}
+
+	// Fallback: no script.* found, read command.sh (always present, contains the raw command string)
+	cmdPath := filepath.Join(runDir, "command.sh")
+	data, err := os.ReadFile(cmdPath)
+	if err == nil && len(data) > 0 && !bytes.Contains(data, []byte{0}) {
+		return ScriptSnapshot{
+			Name:    "command.sh",
+			Path:    cmdPath,
+			Content: string(data),
+		}, nil
+	}
+
 	return ScriptSnapshot{}, fmt.Errorf("未找到该 run 的脚本快照")
 }
 
