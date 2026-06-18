@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 type RunRow struct {
@@ -64,9 +68,10 @@ type ArtifactRow struct {
 }
 
 type ScriptSnapshot struct {
-	Name    string
-	Path    string
-	Content string
+	Name       string
+	Path       string
+	Content    string
+	IsFallback bool // true when content comes from command.sh (raw command, not a script snapshot)
 }
 
 // ReadScriptSnapshot reads the saved input script snapshot from a run directory.
@@ -102,9 +107,10 @@ func ReadScriptSnapshot(runDir string) (ScriptSnapshot, error) {
 	data, err := os.ReadFile(cmdPath)
 	if err == nil && len(data) > 0 && !bytes.Contains(data, []byte{0}) {
 		return ScriptSnapshot{
-			Name:    "command.sh",
-			Path:    cmdPath,
-			Content: string(data),
+			Name:       "command.sh",
+			Path:       cmdPath,
+			Content:    string(data),
+			IsFallback: true,
 		}, nil
 	}
 
@@ -116,32 +122,127 @@ func FormatRunList(runs []RunRow) string {
 		return Gray("未找到运行记录。\n")
 	}
 	var b strings.Builder
-	b.WriteString(TableHeader("%-24s %-16s %-15s %-22s %-6s %-10s %s\n",
-		"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION", "COMMAND"))
-	b.WriteString(Dim("----                     ----            -------         ------                ----   --------   -------\n"))
+	b.WriteString(TableHeader("%-24s %-16s %-15s %-22s %-6s %-10s\n",
+		"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION"))
+	b.WriteString(Dim("----                     ----            -------         ------                ----   --------\n"))
 	for _, r := range runs {
 		name := r.Name
 		if len(name) > 12 {
 			name = name[:9] + "..."
 		}
-		cmd := r.Command
-		if len(cmd) > 32 {
-			cmd = cmd[:29] + "..."
-		}
 		statusLabel := r.Status
 		if r.DisplayStatus != "" && r.DisplayStatus != r.Status {
 			statusLabel = r.Status + "(+" + strings.TrimPrefix(r.DisplayStatus, r.Status+"_") + ")"
 		}
-		fmt.Fprintf(&b, "%s %s %s %s %s %s %s\n",
+		fmt.Fprintf(&b, "%s %s %s %s %s %s\n",
 			PadRight(r.ID, 24),
 			PadRight(name, 16),
 			PadRight(r.Project, 15),
 			PadRight(StatusColor(statusLabel), 22),
 			PadRight(r.Diagnostic, 6),
-			PadRight(r.Duration, 10),
-			Dim(cmd))
+			PadRight(r.Duration, 10))
+
+		// Command as hanging block below the row
+		wrapped := wrapCommand(r.Command)
+		for i, line := range wrapped {
+			if i == 0 {
+				fmt.Fprintf(&b, "  %s\n", Dim(line))
+			} else {
+				fmt.Fprintf(&b, "    %s\n", Dim(line))
+			}
+		}
 	}
 	return b.String()
+}
+
+// wrapCommand splits a command into lines fitting within terminal width.
+// Prefers breaking at spaces and --flag boundaries; falls back to hard break.
+// When stdout is not a TTY (width=0), returns the command unwrapped.
+func wrapCommand(cmd string) []string {
+	width := getTermWidth()
+	if width == 0 || len(cmd) <= width-2 {
+		return []string{cmd}
+	}
+
+	firstLineWidth := width - 2
+	contLineWidth := width - 4
+
+	var lines []string
+	remaining := cmd
+
+	for len(remaining) > 0 {
+		lineWidth := firstLineWidth
+		if len(lines) > 0 {
+			lineWidth = contLineWidth
+		}
+
+		if len(remaining) <= lineWidth {
+			lines = append(lines, remaining)
+			break
+		}
+
+		breakIdx := findBreakPoint(remaining[:lineWidth+1], lineWidth)
+		lines = append(lines, remaining[:breakIdx])
+		remaining = strings.TrimSpace(remaining[breakIdx:])
+	}
+
+	return lines
+}
+
+// findBreakPoint finds best position to break within limit chars.
+// Priority: space before "--flag" > any space > hard cut at limit.
+func findBreakPoint(s string, limit int) int {
+	if len(s) <= limit {
+		return len(s)
+	}
+
+	// Prefer breaking before a --flag (must have space or string-start before --)
+	for i := limit - 1; i >= 2; i-- {
+		if s[i] == '-' && s[i-1] == '-' && (i == 2 || s[i-2] == ' ') {
+			return i - 1
+		}
+	}
+
+	lastSpace := strings.LastIndex(s[:limit], " ")
+	if lastSpace > limit/2 {
+		return lastSpace
+	}
+
+	return limit
+}
+
+// getTermWidth returns terminal columns for stdout.
+// Returns 0 when stdout is not a TTY (pipe/redirect) — callers should treat this as "unlimited".
+func getTermWidth() int {
+	// 1) Primary: ioctl on stdout fd — works for real terminals, fails cleanly for pipes
+	var ws struct{ Row, Col, Xpixel, Ypixel uint16 }
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(os.Stdout.Fd()),
+		uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+	if errno == 0 && ws.Col > 0 {
+		return int(ws.Col)
+	}
+
+	// 2) $COLUMNS — set by most shells, updated on resize
+	if w := os.Getenv("COLUMNS"); w != "" {
+		if n, err := strconv.Atoi(w); err == nil && n > 0 {
+			return n
+		}
+	}
+
+	// 3) stty size on stdin — fallback for edge cases
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = os.Stdin
+	if out, err := cmd.Output(); err == nil {
+		parts := strings.Fields(string(out))
+		if len(parts) == 2 {
+			if n, err := strconv.Atoi(parts[1]); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+
+	// 4) Pipe / redirect mode: return 0 = unlimited (no wrapping)
+	return 0
 }
 
 func FormatShow(r *RunDetail) string {

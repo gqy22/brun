@@ -52,8 +52,14 @@ func TestScriptCmdPrintsSnapshot(t *testing.T) {
 	if err := c.Execute(); err != nil {
 		t.Fatalf("scriptCmd() error = %v", err)
 	}
-	if out.String() != content {
-		t.Errorf("output = %q, want %q", out.String(), content)
+	output := out.String()
+	// Should contain the metadata header followed by script content
+	if !strings.Contains(output, "04.sh") || !strings.Contains(output, "echo hello") {
+		t.Errorf("output = %q, want header with 04.sh and content echo hello", output)
+	}
+	// Header line starts with # ──
+	if !strings.Contains(output, "# ──") {
+		t.Errorf("output missing metadata header, got: %q", output)
 	}
 }
 
