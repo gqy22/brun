@@ -38,17 +38,20 @@ type WebServer struct {
 	autoIncrement bool
 	tmplDir       fs.FS
 	static        fs.FS
+	hostSampler   *cpuSampler
 }
 
 func NewWebServer(store *internal.Store, addr string, port int, tmplFS, staticFS fs.FS) *WebServer {
-	return &WebServer{
+	ws := &WebServer{
 		store:         store,
 		addr:          addr,
 		port:          port,
 		autoIncrement: true,
 		tmplDir:       tmplFS,
 		static:        staticFS,
+		hostSampler:   startCPUSampler(2 * time.Second),
 	}
+	return ws
 }
 
 func (s *WebServer) SetAutoIncrementPort(enabled bool) {
@@ -76,6 +79,7 @@ func (s *WebServer) ListenAndServe() error {
 	mux.HandleFunc("GET /api/tags", s.apiTags)
 	mux.HandleFunc("GET /api/hosts", s.apiHosts)
 	mux.HandleFunc("GET /api/users", s.apiUsers)
+	mux.HandleFunc("GET /api/host", s.apiHost)
 
 	// Page routes (catch-all last)
 	mux.HandleFunc("GET /", s.pageIndex)
@@ -641,6 +645,12 @@ func (s *WebServer) apiUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	sortStrings(users)
 	jsonResponse(w, users)
+}
+
+// apiHost 返回主机资源指标（CPU/内存/负载/磁盘），供 Dashboard 主机资源卡片使用。
+func (s *WebServer) apiHost(w http.ResponseWriter, r *http.Request) {
+	cpuPercent, known := s.hostSampler.Snapshot()
+	jsonResponse(w, gatherHostStats(cpuPercent, known))
 }
 
 func sortStrings(s []string) {

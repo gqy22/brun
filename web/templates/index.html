@@ -26,6 +26,45 @@
       </div>
     </div>
 
+    <!-- 主机资源 -->
+    <template x-if="hostStats && hostStats.memory">
+      <div class="host-bar">
+        <div class="host-item">
+          <div class="host-item-label">CPU</div>
+          <div class="host-item-value">
+            <strong x-text="hostStats.cpu.known ? hostStats.cpu.used_percent.toFixed(1)+'%' : '···'"></strong>
+            <span class="host-item-sub" x-show="hostStats.cpu.cores" x-text="hostStats.cpu.cores+' cores'"></span>
+          </div>
+          <div class="host-progress"><div class="host-progress-bar" :style="'width:'+(hostStats.cpu.used_percent||0)+'%'"></div></div>
+        </div>
+        <div class="host-item">
+          <div class="host-item-label">内存</div>
+          <div class="host-item-value">
+            <strong x-text="(hostStats.memory.used_percent||0).toFixed(1)+'%'"></strong>
+            <span class="host-item-sub" x-text="fmtBytes(hostStats.memory.available)+' 可用 / '+fmtBytes(hostStats.memory.total)"></span>
+          </div>
+          <div class="host-progress"><div class="host-progress-bar" :style="'width:'+(hostStats.memory.used_percent||0)+'%'"></div></div>
+        </div>
+        <div class="host-item host-item-load">
+          <div class="host-item-label">负载 (1/5/15min)</div>
+          <div class="host-item-value">
+            <strong x-text="(hostStats.load.load1||0).toFixed(2)"></strong>
+            <span class="host-item-sub" x-text="(hostStats.load.load5||0).toFixed(2)+' / '+(hostStats.load.load15||0).toFixed(2)"></span>
+          </div>
+        </div>
+        <template x-for="d in visibleDisks" :key="d.mountpoint">
+          <div class="host-item">
+            <div class="host-item-label" x-text="d.mountpoint"></div>
+            <div class="host-item-value">
+              <strong x-text="(d.used_percent||0).toFixed(1)+'%'"></strong>
+              <span class="host-item-sub" x-text="fmtBytes(d.free)+' 剩余 / '+fmtBytes(d.total)"></span>
+            </div>
+            <div class="host-progress"><div class="host-progress-bar" :style="'width:'+(d.used_percent||0)+'%'"></div></div>
+          </div>
+        </template>
+      </div>
+    </template>
+
     <!-- 过滤栏 -->
     <div class="filter-bar">
       <input type="text" x-model="filters.search" @input.debounce.300ms="loadRuns()"
@@ -178,13 +217,17 @@
         users: [],
         runs: [],
         stats: { total: null, rate: 0, todayCount: 0, running: 0, failed: 0 },
+        hostStats: {},
         _runningTimers: {},
         _autoRefreshTimer: null,
+        _hostTimer: null,
 
         async init() {
           await this.loadFilters();
           await this.loadRuns();
           this.loadFooterStats();
+          this.loadHostStats();
+          this._hostTimer = setInterval(() => this.loadHostStats(), 10000);
         },
 
         get activeFilterCount() {
@@ -311,6 +354,22 @@
           } catch (e) { /* 静默 */ }
         },
 
+        async loadHostStats() {
+          try {
+            const r = await fetch('/api/host');
+            if (r.ok) this.hostStats = await r.json();
+          } catch (e) { /* 静默 */ }
+        },
+
+        get visibleDisks() {
+          var disks = (this.hostStats && this.hostStats.disks) || [];
+          // 只展示大于 1GB 的数据盘，按容量降序取前 6 个，过滤掉 snap/容器等噪音挂载点
+          return disks
+            .filter(function(d) { return d.total > 1024 * 1024 * 1024; })
+            .sort(function(a, b) { return b.total - a.total; })
+            .slice(0, 6);
+        },
+
         async deleteRun(id, e) {
           modalConfirm('确认删除', '将同时删除日志和输出文件，不可恢复。', async () => {
             var r = await fetch('/api/runs/' + id, { method: 'DELETE' });
@@ -320,6 +379,13 @@
           });
         }
       };
+    }
+    function fmtBytes(b) {
+      if (!b || b < 1) return '0';
+      var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      var i = Math.floor(Math.log(b) / Math.log(1024));
+      if (i >= units.length) i = units.length - 1;
+      return (b / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
     }
   </script>
 </body>

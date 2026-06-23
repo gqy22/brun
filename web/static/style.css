@@ -196,6 +196,63 @@ body {
   letter-spacing: .45px;
 }
 
+/* ===== Host Bar — 主机资源概览 ===== */
+.host-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.host-item {
+  flex: 1 1 150px;
+  min-width: 140px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+.host-item-load { flex: 0 0 auto; }
+.host-item-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .45px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.host-item-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.host-item-value strong {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.host-item-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+.host-progress {
+  margin-top: 7px;
+  height: 4px;
+  background: var(--bg-alt);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.host-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  transition: width .4s var(--ease-out);
+}
+
 /* ===== Filter Bar — 控制面板风格 ===== */
 .filter-bar {
   display: flex;

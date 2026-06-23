@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -59,6 +60,7 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	mux.HandleFunc("GET /api/runs/{id}/processes", ws.apiGetProcesses)
 	mux.HandleFunc("GET /api/hosts", ws.apiHosts)
 	mux.HandleFunc("GET /api/users", ws.apiUsers)
+	mux.HandleFunc("GET /api/host", ws.apiHost)
 
 	// 启动真实 HTTP server（用于 SSE 长连接测试）
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -776,6 +778,38 @@ func TestWebServerExplicitPortDoesNotAutoIncrement(t *testing.T) {
 	if !strings.Contains(err.Error(), fmt.Sprintf("端口 %d 不可用", port)) {
 		t.Fatalf("error = %q, want explicit port unavailable", err)
 	}
+}
+
+func TestApiHost_ReturnsHostStats(t *testing.T) {
+	ts, _ := newTestServer(t)
+
+	w := ts.doReq("GET", "/api/host")
+	if w.Code != 200 {
+		t.Fatalf("GET /api/host status = %d, want 200", w.Code)
+	}
+
+	var stats HostStats
+	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal host stats: %v", err)
+	}
+	if runtime.GOOS == "linux" && stats.Memory.Total == 0 {
+		t.Errorf("memory.total = 0 on linux, want > 0")
+	}
+
+	// 采样器在 newTestServer 构造时已启动；预热后再取一次确认 CPU 样本就绪
+	time.Sleep(1500 * time.Millisecond)
+	w2 := ts.doReq("GET", "/api/host")
+	var stats2 HostStats
+	if err := json.Unmarshal(w2.Body.Bytes(), &stats2); err != nil {
+		t.Fatalf("unmarshal host stats (2): %v", err)
+	}
+	if runtime.GOOS == "linux" && !stats2.CPU.Known {
+		t.Errorf("cpu.known = false after 1.5s warmup on linux")
+	}
+
+	t.Logf("hostname=%s mem.total=%d cpu=%.1f%% cores=%d disks=%d load=%.2f",
+		stats2.Hostname, stats2.Memory.Total, stats2.CPU.UsedPercent, stats2.CPU.Cores,
+		len(stats2.Disks), stats2.Load.Load1)
 }
 
 // ===== 辅助函数 =====
