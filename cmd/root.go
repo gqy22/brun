@@ -262,7 +262,7 @@ func FormatCleanSummary(items []CleanItem, dryRun bool) string {
 	return b.String()
 }
 
-func BuildRerunCommand(run *internal.Run, newCWD string, inheritTags bool) (string, string) {
+func BuildRerunCommand(run *internal.Run, newCWD string, _ bool) (string, string) {
 	cwd := run.CWD
 	if newCWD != "" {
 		cwd = newCWD

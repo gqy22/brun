@@ -1,5 +1,5 @@
 ---
-use: "show <run_id>"
+use: "show [<run_id> | --latest]"
 short: "显示运行详情"
 long: |
   显示单次运行的完整元数据详情，包括执行信息、资源消耗、Git 状态、标签备注和诊断结果。

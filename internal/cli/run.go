@@ -65,33 +65,7 @@ func runCmd() *cobra.Command {
 	var runIDFlag string
 
 	c := &cobra.Command{
-		Use:   "run -- <command...>",
-		Short: "执行命令并记录运行信息 (默认 nohup 后台运行)",
-		Long:  "执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。",
-		Example: `  # 基本用法 (默认 nohup 后台运行，关终端不会中断)
-  brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
-  # 日志写入: ~/.brun/runs/YYYY/MM/DD/<run_id>/stdout.o 和 stderr.er
-
-  # 带项目名和标签
-  brun run -p genome-align -t hg38,pep-align -- bwa mem ref.fa reads.fq > aligned.sam
-
-  # 智能体推荐：前台运行，命令退出后再读取 run 记录和诊断
-  brun run -f -p genome-align -n align-S1 -- bwa mem ref.fa reads.fq
-
-  # Snakemake 流程 (前台运行，方便调试)
-  brun run -f -- snakemake -j 8
-
-  # FastQC 质控，指定名称和备注
-  brun run -n "qc-report" --note "样本质量控制" -- fastqc *.fastq.gz
-
-  # samtools 允许特定非零退出码（如空区域）
-  brun run --allow-exit 1,2 -- samtools view -b input.bam "chr1:1-1000"
-
-  # 在指定目录运行 R 脚本
-  brun run --cwd /data/project -- Rscript analysis.R
-
-  # 设置超时 (1 小时)
-  brun run --timeout 3600 -- hisat2 -x genome_idx -1 r1.fq -r2.fq`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			if foreground {
 				return executeRun(args, name, project, note, tags,
@@ -199,9 +173,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 7. 打印启动信息
-	fmt.Printf("Run started: %s\n", runID)
-	fmt.Printf("Project: %s\n", projName)
-	fmt.Printf("Logs: %s\n", runDir)
+	fmt.Printf("运行已启动: %s\n", runID)
+	fmt.Printf("项目: %s\n", projName)
+	fmt.Printf("日志: %s\n", runDir)
 	internal.Log().Info("run_started", "run_id", runID, "project", projName, "command", commandStr, "cwd", cwd)
 
 	// 8. 打开 DB，写入 running 记录
@@ -268,8 +242,8 @@ func executeRun(args []string, name, project, note string, tags []string,
 		if err := finishRun(store, diagnostics, runRecord, result, "failed"); err != nil {
 			return err
 		}
-		fmt.Printf("\nCommand finished failed in %s\n", cmd.DurationString(result.DurationMs))
-		fmt.Printf("stderr (last 1 lines):\n  %s\n", message)
+		fmt.Printf("\n命令执行失败，耗时 %s\n", cmd.DurationString(result.DurationMs))
+		fmt.Printf("stderr（最后 1 行）:\n  %s\n", message)
 		fmt.Printf("完整日志: brun logs %s --stderr\n", runID)
 		printDiagnosticSummary(runDir)
 		return nil
@@ -384,7 +358,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 
 	// 16. 打印摘要
-	fmt.Printf("\nCommand finished %s in %s\n", status, cmd.DurationString(result.DurationMs))
+	fmt.Printf("\n命令执行完成: %s，耗时 %s\n", status, cmd.DurationString(result.DurationMs))
 	internal.Log().Info("run_finished", "run_id", runID, "status", status, "exit_code", result.ExitCode, "duration", cmd.DurationString(result.DurationMs))
 	if status == "failed" {
 		if errData, err := os.ReadFile(stderrPath); err == nil {
@@ -393,7 +367,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 				if len(lastN) > 5 {
 					lastN = lastN[len(lastN)-5:]
 				}
-				fmt.Printf("stderr (last %d lines):\n", len(lastN))
+				fmt.Printf("stderr（最后 %d 行）:\n", len(lastN))
 				for _, l := range lastN {
 					fmt.Printf("  %s\n", l)
 				}
@@ -403,7 +377,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 	arts, _ := store.GetArtifacts(runID)
 	if len(arts) > 0 {
-		fmt.Printf("Outputs detected: %d\n", len(arts))
+		fmt.Printf("检测到输出文件: %d\n", len(arts))
 	}
 	printDiagnosticSummary(runDir)
 

@@ -5,11 +5,11 @@ long: |
   执行命令并自动记录运行日志、环境信息、Git 状态和输出文件变更。默认以 nohup 方式后台运行，关闭终端不会中断任务。
 example: |
   # 基本用法 (默认 nohup 后台运行，关终端不会中断)
-  brun run -- bwa mem -t 16 ref.fa reads_*.fq > aligned.sam
+  brun run -- sh -c 'bwa mem -t 16 ref.fa reads_*.fq > aligned.sam'
   # 日志写入: ~/.brun/runs/YYYY/MM/DD/<run_id>/stdout.o 和 stderr.er
 
   # 带项目名和标签
-  brun run -p genome-align -t hg38,pep-align -- bwa mem ref.fa reads.fq > aligned.sam
+  brun run -p genome-align -t hg38,pep-align -- sh -c 'bwa mem ref.fa reads.fq > aligned.sam'
 
   # 智能体推荐：前台运行，命令退出后再读取 run 记录和诊断
   brun run -f -p genome-align -n align-S1 -- bwa mem ref.fa reads.fq
@@ -35,4 +35,6 @@ output: |
   **前台模式** (-f)：透传命令退出码，命令结束后再写入 run 记录。
 
   日志文件位置：~/.brun/runs/YYYY/MM/DD/<run_id>/stdout.o 和 stderr.er
+
+  管道、重定向和通配符由外层 shell 解析。需要它们成为被记录命令的一部分时，请使用 sh -c '...'。
 ---

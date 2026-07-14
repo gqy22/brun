@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/biotools/brun/internal"
+	"github.com/spf13/cobra"
 )
 
 func TestScriptCmdPrintsSnapshot(t *testing.T) {
@@ -470,6 +471,9 @@ func TestCleanCmdDryRunJSONDoesNotDelete(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
 		t.Fatalf("json decode: %v\n%s", err, out.String())
 	}
+	if !strings.Contains(out.String(), "\n  \"count\"") {
+		t.Fatalf("clean JSON should use the shared indented format: %s", out.String())
+	}
 	if resp.Write || resp.Count != 1 || len(resp.Runs) != 1 || resp.Runs[0].RunID != "old-run" {
 		t.Fatalf("unexpected clean json: %+v", resp)
 	}
@@ -525,6 +529,162 @@ func TestCleanCmdWriteDeletesMatchedRun(t *testing.T) {
 	defer store.Close()
 	if _, err := store.GetRun("old-run"); err == nil {
 		t.Fatal("run still exists after clean --write")
+	}
+}
+
+func TestListCmdFiltersDisplayStatus(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, run := range []*internal.Run{
+		{ID: "plain", CWD: "/tmp", Command: "true", Status: "success", StartedAt: now, RunDir: home},
+		{ID: "warned", CWD: "/tmp", Command: "true", Status: "success", StartedAt: now, RunDir: home, DiagWarningCount: 1},
+	} {
+		if err := store.CreateRun(run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.Close()
+
+	c := listCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetArgs([]string{"--status", "success_with_warnings", "--json"})
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+		t.Fatalf("decode list JSON: %v\n%s", err, out.String())
+	}
+	if len(rows) != 1 || rows[0].ID != "warned" {
+		t.Fatalf("rows = %+v, want only warned", rows)
+	}
+}
+
+func TestCleanCmdAcceptsAbsoluteDate(t *testing.T) {
+	home := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateRun(&internal.Run{
+		ID: "old", CWD: "/tmp", Command: "true", Status: "success",
+		StartedAt: time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339), RunDir: home,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	c := cleanCmd()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetArgs([]string{"--older-than", time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02"), "--json"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("clean absolute date: %v", err)
+	}
+	var payload struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil || payload.Count != 1 {
+		t.Fatalf("payload = %+v, err = %v, output = %s", payload, err, out.String())
+	}
+}
+
+func TestRerunWithSameTagsCopiesTags(t *testing.T) {
+	home := fastTempDir(t)
+	cwd := fastTempDir(t)
+	t.Setenv("BRUN_HOME", home)
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateRun(&internal.Run{
+		ID: "source", Project: "proj", CWD: cwd, Command: "true", Status: "success",
+		StartedAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), RunDir: home,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddTag("source", "sample:S1"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	c := rerunCmd()
+	c.SetArgs([]string{"source", "--with-same-tags", "--name", "copied"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	store, err = openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	latest, err := store.GetLatestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags, err := store.GetTags(latest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Name != "copied" || !containsString(tags, "sample:S1") {
+		t.Fatalf("latest = %+v, tags = %v", latest, tags)
+	}
+}
+
+func TestCommandArgumentContracts(t *testing.T) {
+	for name, factory := range map[string]func() *cobra.Command{
+		"list": listCmd, "clean": cleanCmd, "repair": repairCmd, "web": webCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := factory()
+			c.SetArgs([]string{"stray"})
+			if err := c.Execute(); err == nil {
+				t.Fatal("unexpected positional argument was accepted")
+			}
+		})
+	}
+}
+
+func TestLogsAndScriptFlagContracts(t *testing.T) {
+	logs := logsCmd()
+	if flag := logs.Flags().ShorthandLookup("f"); flag == nil || flag.Name != "follow" {
+		t.Fatalf("logs -f is not registered as --follow: %+v", flag)
+	}
+	logs.SetArgs([]string{"id", "--stdout", "--stderr"})
+	if err := logs.Execute(); err == nil || !strings.Contains(err.Error(), "不能同时") {
+		t.Fatalf("logs accepted mutually exclusive streams: %v", err)
+	}
+
+	script := scriptCmd()
+	script.SetArgs([]string{"id1", "id2", "--path"})
+	if err := script.Execute(); err == nil || !strings.Contains(err.Error(), "--path") {
+		t.Fatalf("script accepted --path in diff mode: %v", err)
+	}
+}
+
+func TestListRejectsInvalidLimitAndStatus(t *testing.T) {
+	for name, args := range map[string][]string{
+		"zero limit":     {"--limit", "0"},
+		"unknown status": {"--status", "done"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := fastTempDir(t)
+			t.Setenv("BRUN_HOME", home)
+			c := listCmd()
+			c.SetArgs(args)
+			if err := c.Execute(); err == nil {
+				t.Fatalf("list accepted invalid args %v", args)
+			}
+		})
 	}
 }
 

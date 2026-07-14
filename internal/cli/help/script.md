@@ -1,5 +1,5 @@
 ---
-use: "script <run_id>"
+use: "script [<run_id> [<other_run_id>] | --latest]"
 short: "查看运行时保存的脚本快照"
 long: |
   查看运行时自动保存的输入脚本快照。当通过 brun run 执行 .sh/.py/.R 等脚本文件时，

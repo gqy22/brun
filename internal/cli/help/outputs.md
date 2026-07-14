@@ -1,5 +1,5 @@
 ---
-use: "outputs <run_id>"
+use: "outputs [<run_id> | --latest]"
 short: "查看输出文件"
 long: |
   列出运行产生的输出文件。通过 fs-diff 检测命令执行前后的文件系统变更，

@@ -25,7 +25,11 @@ func listCmd() *cobra.Command {
 
 	ht := MustParse("list")
 	cc := &cobra.Command{
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
+			if limit <= 0 {
+				return cliError("invalid_limit", "--limit 必须大于 0", "例如 brun list --limit 20", nil)
+			}
 			store, err := openStoreReadOnly()
 			if err != nil {
 				return err
@@ -48,7 +52,11 @@ func listCmd() *cobra.Command {
 				}
 			}
 
-			runs, err := store.ListRuns(limit, project, status, tag, search, sinceVal, untilVal, false, host, user)
+			baseStatus, withWarnings, err := parseListStatusFilter(status)
+			if err != nil {
+				return err
+			}
+			runs, err := store.ListRuns(limit, project, baseStatus, tag, search, sinceVal, untilVal, withWarnings, host, user)
 			if err != nil {
 				return err
 			}
@@ -83,7 +91,7 @@ func listCmd() *cobra.Command {
 		},
 	}
 	cc.Flags().StringVarP(&project, "project", "p", "", "按项目过滤")
-	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (success/failed/running)")
+	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (running/success/failed/cancelled 及 *_with_warnings)")
 	cc.Flags().StringVarP(&tag, "tag", "t", "", "按 tag 过滤")
 	cc.Flags().StringVarP(&search, "search", "s", "", "在命令/名称中搜索关键词")
 	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
@@ -303,11 +311,14 @@ func scriptCmd() *cobra.Command {
 	c := &cobra.Command{
 		// Accept 1 or 2 args: single run view, or diff two runs
 		Args: func(cc *cobra.Command, args []string) error {
-		if latest && len(args) != 0 {
-			return cliError("ambiguous_run_selector", "--latest 不能和 run_id 同时使用", "删除 run_id 参数，或删除 --latest 后指定一个真实 run_id", nil)
-		}
-		if !latest && (len(args) == 0 || len(args) > 2) {
+			if latest && len(args) != 0 {
+				return cliError("ambiguous_run_selector", "--latest 不能和 run_id 同时使用", "删除 run_id 参数，或删除 --latest 后指定一个真实 run_id", nil)
+			}
+			if !latest && (len(args) == 0 || len(args) > 2) {
 				return cliError("missing_run_selector", "需要 1 个 run_id（查看脚本）或 2 个 run_id（对比差异），或使用 --latest", "先运行 brun list --limit 5 查看 run_id，或使用 --latest", nil)
+			}
+			if pathOnly && len(args) == 2 {
+				return cliError("incompatible_flags", "--path 不能与双 run_id diff 模式同时使用", "删除 --path，或只指定一个 run_id", nil)
 			}
 			return nil
 		},
@@ -529,6 +540,12 @@ func logsCmd() *cobra.Command {
 	c := &cobra.Command{
 		Args: runSelectorArgs(&latest),
 		RunE: func(c *cobra.Command, args []string) error {
+			if stdoutOnly && stderrOnly {
+				return cliError("incompatible_flags", "--stdout 和 --stderr 不能同时使用", "只保留其中一个选项", nil)
+			}
+			if tailN < 0 {
+				return cliError("invalid_tail", "--tail 不能为负数", "使用 0 显示全部，或指定正整数", nil)
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -576,7 +593,7 @@ func logsCmd() *cobra.Command {
 	c.Flags().BoolVar(&stdoutOnly, "stdout", false, "只看 stdout")
 	c.Flags().BoolVar(&stderrOnly, "stderr", false, "只看 stderr")
 	c.Flags().IntVar(&tailN, "tail", 0, "最后 N 行")
-	c.Flags().BoolVar(&follow, "follow", false, "持续跟踪 (类似 tail -f)")
+	c.Flags().BoolVarP(&follow, "follow", "f", false, "持续跟踪 (类似 tail -f；默认跟踪 stdout)")
 	c.Flags().BoolVar(&latest, "latest", false, "查看最新运行")
 	ht.Inject(c)
 	return c
@@ -788,7 +805,7 @@ func diagCmd() *cobra.Command {
 				return enc.Encode(payload)
 			}
 			fmt.Fprintf(c.OutOrStdout(), "Run ID: %s\n", r.ID)
-			fmt.Fprintf(c.OutOrStdout(), "Diagnostics: %d info, %d warning, %d error\n", summary.InfoCount, summary.WarningCount, summary.ErrorCount)
+			fmt.Fprintf(c.OutOrStdout(), "诊断: %d info, %d warning, %d error\n", summary.InfoCount, summary.WarningCount, summary.ErrorCount)
 			if len(visible) == 0 {
 				fmt.Fprintln(c.OutOrStdout(), "未找到诊断事件。")
 				return nil
@@ -853,6 +870,24 @@ func parseTimeFilter(s string) (string, error) {
 
 func invalidTimeFilterError(s string) error {
 	return fmt.Errorf("无效时间 %q，支持 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw", s)
+}
+
+func parseListStatusFilter(status string) (string, bool, error) {
+	if status == "" {
+		return "", false, nil
+	}
+	withWarnings := strings.HasSuffix(status, "_with_warnings")
+	base := strings.TrimSuffix(status, "_with_warnings")
+	switch base {
+	case "running", "success", "failed", "cancelled":
+		if withWarnings && base == "running" {
+			return "", false, cliError("invalid_status", "running 没有 with_warnings 变体", "使用 --status running", nil)
+		}
+		return base, withWarnings, nil
+	default:
+		return "", false, cliError("invalid_status", "未知状态: "+status,
+			"支持 running、success、failed、cancelled 及 success/failed/cancelled_with_warnings", nil)
+	}
 }
 
 // --- web ---

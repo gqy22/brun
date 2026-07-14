@@ -1,5 +1,5 @@
 ---
-use: "rerun <run_id>"
+use: "rerun [<run_id> | --latest]"
 short: "重新运行"
 long: |
   基于已有 run 记录重新执行相同命令。默认继承原 run 的 project 和 cwd；

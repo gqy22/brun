@@ -1,5 +1,5 @@
 ---
-use: "note <run_id> \"text\""
+use: "note [<run_id> | --latest] <text>"
 short: "添加备注"
 long: |
   为指定 run 添加自由文本备注。每次调用会**覆盖**之前的备注（单条备注模式），

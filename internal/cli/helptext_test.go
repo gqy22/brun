@@ -119,6 +119,24 @@ output: |
 	if !strings.Contains(ht.Output, "Output") {
 		t.Errorf("Output = %q", ht.Output)
 	}
+	if ht.Example != "# Example 1\ncmd --foo" {
+		t.Errorf("Example indentation = %q", ht.Example)
+	}
+}
+
+func TestTerminalHelpTextRemovesMarkdownSyntax(t *testing.T) {
+	input := "## 输出\n\n**状态**: `success`\n\n| 列 | 说明 |\n|---|---|\n| ID | 标识 |"
+	got := terminalHelpText(input)
+	for _, marker := range []string{"##", "**", "`", "|---"} {
+		if strings.Contains(got, marker) {
+			t.Fatalf("terminal help still contains %q: %q", marker, got)
+		}
+	}
+	for _, text := range []string{"输出:", "状态: success", "ID  标识"} {
+		if !strings.Contains(got, text) {
+			t.Fatalf("terminal help missing %q: %q", text, got)
+		}
+	}
 }
 
 func TestUnquote(t *testing.T) {
@@ -159,13 +177,13 @@ func TestInjectSetsCobraFields(t *testing.T) {
 	if cmd.Long != "long description" {
 		t.Errorf("Long = %q", cmd.Long)
 	}
-	if cmd.Example != "# example\ntest -- foo" {
+	if cmd.Example != "example:\ntest -- foo" {
 		t.Errorf("Example = %q", cmd.Example)
 	}
 	if len(cmd.Aliases) != 1 || cmd.Aliases[0] != "t" {
 		t.Errorf("Aliases = %v", cmd.Aliases)
 	}
-	if cmd.Annotations["output"] != "## Output\nsome output" {
+	if cmd.Annotations["output"] != "Output:\nsome output" {
 		t.Errorf("Annotations[output] = %q", cmd.Annotations["output"])
 	}
 }
@@ -195,21 +213,21 @@ func TestMustParsePanics(t *testing.T) {
 func TestCommandHelpRenders(t *testing.T) {
 	// Verify that every registered command can render help without panic
 	cmds := map[string]func() *cobra.Command{
-		"init":   initCmd,
-		"run":    runCmd,
-		"list":   listCmd,
-		"show":   showCmd,
-		"script": scriptCmd,
-		"logs":   logsCmd,
+		"init":    initCmd,
+		"run":     runCmd,
+		"list":    listCmd,
+		"show":    showCmd,
+		"script":  scriptCmd,
+		"logs":    logsCmd,
 		"outputs": outputsCmd,
-		"diag":   diagCmd,
-		"tag":    tagCmd,
-		"note":   noteCmd,
-		"stop":   stopCmd,
-		"rerun":  rerunCmd,
-		"clean":  cleanCmd,
-		"repair": repairCmd,
-		"web":    webCmd,
+		"diag":    diagCmd,
+		"tag":     tagCmd,
+		"note":    noteCmd,
+		"stop":    stopCmd,
+		"rerun":   rerunCmd,
+		"clean":   cleanCmd,
+		"repair":  repairCmd,
+		"web":     webCmd,
 	}
 	for name, factory := range cmds {
 		t.Run(name, func(t *testing.T) {

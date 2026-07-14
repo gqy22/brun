@@ -1,5 +1,5 @@
 ---
-use: "clean --older-than <duration>"
+use: "clean --older-than <time>"
 short: "清理旧运行记录"
 long: |
   清理符合条件的 run 记录和对应的 run 目录。默认只预览匹配结果，

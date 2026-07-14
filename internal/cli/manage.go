@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,12 +22,12 @@ func tagCmd() *cobra.Command {
 		Args: func(c *cobra.Command, args []string) error {
 			if latest {
 				if len(args) < 1 {
-					return fmt.Errorf("需要至少一个 tag")
+					return cliError("missing_tag", "需要至少一个标签", "例如 brun tag --latest sample:S1", nil)
 				}
 				return nil
 			}
 			if len(args) < 2 {
-				return fmt.Errorf("需要 run_id 和至少一个 tag，或使用 --latest")
+				return cliError("missing_tag_target", "需要 run_id 和至少一个标签，或使用 --latest", "例如 brun tag <run_id> sample:S1", nil)
 			}
 			return nil
 		},
@@ -39,23 +38,24 @@ func tagCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			targetID := args[0]
+			var target *internal.Run
 			tags := args[1:]
 			if latest {
-				latest, err := store.GetLatestRun()
-				if err != nil {
-					return err
-				}
-				targetID = latest.ID
+				target, err = store.GetLatestRun()
 				tags = args
+			} else {
+				target, err = store.GetRun(args[0])
+			}
+			if err != nil {
+				return runLookupError(err)
 			}
 
 			for _, tag := range tags {
-				if err := store.AddTag(targetID, tag); err != nil {
+				if err := store.AddTag(target.ID, tag); err != nil {
 					return err
 				}
 			}
-			fmt.Printf("Added tags to %s: %v\n", targetID, tags)
+			fmt.Printf("已为 %s 添加标签: %v\n", target.ID, tags)
 			return nil
 		},
 	}
@@ -70,19 +70,15 @@ func noteCmd() *cobra.Command {
 	var latest bool
 	ht := MustParse("note")
 	c := &cobra.Command{
-		Use:   "note <run_id> \"text\"",
-		Short: "添加备注",
-		Example: `  brun note 20260605-145615-fed727 "STAR index 参数测试"
-  brun note --latest "STAR index 参数测试"`,
 		Args: func(c *cobra.Command, args []string) error {
 			if latest {
 				if len(args) != 1 {
-					return fmt.Errorf("需要备注文本，且 --latest 不能和 run_id 同时使用")
+					return cliError("invalid_note_args", "--latest 模式需要且只能指定备注文本", "例如 brun note --latest \"备注\"", nil)
 				}
 				return nil
 			}
 			if len(args) != 2 {
-				return fmt.Errorf("需要 run_id 和备注文本，或使用 --latest")
+				return cliError("invalid_note_args", "需要 run_id 和备注文本，或使用 --latest", "例如 brun note <run_id> \"备注\"", nil)
 			}
 			return nil
 		},
@@ -93,21 +89,22 @@ func noteCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			targetID := args[0]
+			var target *internal.Run
 			text := args[1]
 			if latest {
-				latest, err := store.GetLatestRun()
-				if err != nil {
-					return err
-				}
-				targetID = latest.ID
+				target, err = store.GetLatestRun()
 				text = args[0]
+			} else {
+				target, err = store.GetRun(args[0])
+			}
+			if err != nil {
+				return runLookupError(err)
 			}
 
-			if err := store.AddNote(targetID, text); err != nil {
+			if err := store.AddNote(target.ID, text); err != nil {
 				return err
 			}
-			fmt.Printf("Note added to %s\n", targetID)
+			fmt.Printf("已为 %s 更新备注\n", target.ID)
 			return nil
 		},
 	}
@@ -219,25 +216,27 @@ func rerunCmd() *cobra.Command {
 
 			cmdStr, execCWD := cmd.BuildRerunCommand(r, newCWD, sameTags)
 			if dryRun {
-				fmt.Printf("Would run: %s\n", cmdStr)
-				fmt.Printf("In directory: %s\n", execCWD)
+				fmt.Printf("将执行: %s\n", cmdStr)
+				fmt.Printf("运行目录: %s\n", execCWD)
 				return nil
 			}
 
 			name := rerunName
+			var tags []string
 			if sameTags {
-				tags, _ := store.GetTags(r.ID)
-				// 继承 tags 到新 run
-				_ = tags
+				tags, err = store.GetTags(r.ID)
+				if err != nil {
+					return err
+				}
 			}
-			return executeRun(cmd.ShellCommandArgs(cmdStr), name, r.Project, "", nil,
+			return executeRun(cmd.ShellCommandArgs(cmdStr), name, r.Project, "", tags,
 				false, "", 0, execCWD, "")
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "只打印不执行")
 	c.Flags().BoolVar(&sameTags, "with-same-tags", false, "继承原 tags")
-	c.Flags().StringVar(&rerunName, "name", "", "指定新 run 名称")
+	c.Flags().StringVarP(&rerunName, "name", "n", "", "指定新 run 名称")
 	c.Flags().BoolVar(&latest, "latest", false, "重新运行最新记录")
 	ht.Inject(c)
 	return c
@@ -254,13 +253,18 @@ func cleanCmd() *cobra.Command {
 
 	ht := MustParse("clean")
 	c := &cobra.Command{
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			if olderThan == "" {
 				return cliError("missing_clean_filter", "缺少清理条件 --older-than", "例如 brun clean --older-than 30d；默认只预览，实际删除需加 --write", nil)
 			}
-			maxAge, err := parseCleanDuration(olderThan)
+			thresholdValue, err := parseTimeFilter(olderThan)
 			if err != nil {
-				return cliError("invalid_clean_duration", "--older-than 无效: "+err.Error(), "支持 Nh、Nd、Nw 或 Go duration，例如 12h、30d、4w", err)
+				return cliError("invalid_clean_time", "--older-than 无效: "+err.Error(), "支持 YYYY-MM-DD、RFC3339、today、Nh、Nd、Nw", err)
+			}
+			threshold, err := time.Parse(time.RFC3339, thresholdValue)
+			if err != nil {
+				return err
 			}
 
 			store, err := openStore()
@@ -269,7 +273,7 @@ func cleanCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			runs, err := store.ListRuns(1000, "", "", "", "", "", "", false, "", "")
+			runs, err := store.ListRuns(-1, "", "", "", "", "", "", false, "", "")
 			if err != nil {
 				return err
 			}
@@ -291,7 +295,7 @@ func cleanCmd() *cobra.Command {
 						continue
 					}
 				}
-				age, oldEnough, err := runAge(r.StartedAt, maxAge)
+				age, oldEnough, err := runOlderThan(r.StartedAt, threshold)
 				if err != nil || !oldEnough {
 					continue
 				}
@@ -312,7 +316,9 @@ func cleanCmd() *cobra.Command {
 					"count":       len(items),
 					"runs":        items,
 				}
-				if err := json.NewEncoder(c.OutOrStdout()).Encode(payload); err != nil {
+				enc := json.NewEncoder(c.OutOrStdout())
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(payload); err != nil {
 					return err
 				}
 			} else {
@@ -329,7 +335,7 @@ func cleanCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&olderThan, "older-than", "", "清理早于此时长的 run")
+	c.Flags().StringVar(&olderThan, "older-than", "", "清理早于指定时间阈值的 run")
 	c.Flags().BoolVar(&keepFailed, "keep-failed", false, "保留失败 run")
 	c.Flags().StringVar(&keepTag, "keep-tag", "", "保留指定 tag 的 run")
 	c.Flags().BoolVar(&write, "write", false, "实际删除匹配的 run；不传时只预览")
@@ -342,13 +348,14 @@ func repairCmd() *cobra.Command {
 	var write bool
 	ht := MustParse("repair")
 	c := &cobra.Command{
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			runs, err := loadRunsFromMetadata(internal.RunsRoot())
 			if err != nil {
 				return err
 			}
 			if !write {
-				fmt.Printf("Found %d run metadata files. Use --write to rebuild the SQLite index.\n", len(runs))
+				fmt.Printf("发现 %d 个 run 元数据文件。使用 --write 重建 SQLite 索引。\n", len(runs))
 				return nil
 			}
 			store, err := openStore()
@@ -366,7 +373,7 @@ func repairCmd() *cobra.Command {
 				}
 				repaired++
 			}
-			fmt.Printf("Rebuilt %d missing run records from %d metadata files.\n", repaired, len(runs))
+			fmt.Printf("已从 %d 个元数据文件中重建 %d 条缺失运行记录。\n", len(runs), repaired)
 			return nil
 		},
 	}
@@ -488,6 +495,7 @@ func webCmd() *cobra.Command {
 
 	ht := MustParse("web")
 	c := &cobra.Command{
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -536,30 +544,7 @@ func ageSince(startedAt string) string {
 	}
 }
 
-func parseCleanDuration(input string) (time.Duration, error) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return 0, fmt.Errorf("empty duration")
-	}
-	unit := input[len(input)-1]
-	if unit == 'd' || unit == 'w' {
-		n, err := strconv.Atoi(input[:len(input)-1])
-		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("expected positive duration, got %q", input)
-		}
-		if unit == 'w' {
-			n *= 7
-		}
-		return time.Duration(n) * 24 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(input)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("expected positive duration, got %q", input)
-	}
-	return d, nil
-}
-
-func runAge(startedAt string, maxAge time.Duration) (string, bool, error) {
+func runOlderThan(startedAt string, threshold time.Time) (string, bool, error) {
 	t, err := time.Parse(time.RFC3339, startedAt)
 	if err != nil {
 		return "?", false, err
@@ -568,7 +553,7 @@ func runAge(startedAt string, maxAge time.Duration) (string, bool, error) {
 	if age < 0 {
 		age = 0
 	}
-	return humanCleanAge(age), age >= maxAge, nil
+	return humanCleanAge(age), !t.After(threshold), nil
 }
 
 func humanCleanAge(d time.Duration) string {

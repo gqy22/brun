@@ -117,8 +117,7 @@ func ParseBytes(data []byte) (*HelpText, error) {
 						break
 					}
 				}
-				val := strings.TrimRight(strings.Join(block, "\n"), "\n")
-				val = strings.TrimLeft(val, " \t") // remove uniform indent
+				val := dedentBlock(block)
 				switch key {
 				case "long":
 					ht.Long = val
@@ -176,12 +175,63 @@ func unquote(s string) string {
 	return s
 }
 
+func dedentBlock(lines []string) string {
+	minIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent > 0 {
+		for i, line := range lines {
+			if len(line) >= minIndent {
+				lines[i] = line[minIndent:]
+			}
+		}
+	}
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
+}
+
+// terminalHelpText converts the small Markdown subset used by help/*.md into
+// readable terminal text. Source files remain convenient Markdown documents,
+// while users do not see raw ##, ** or table separator syntax.
+func terminalHelpText(s string) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+			line = trimmed + ":"
+		}
+		line = strings.ReplaceAll(line, "**", "")
+		line = strings.ReplaceAll(line, "`", "")
+		if strings.HasPrefix(strings.TrimSpace(line), "|") && strings.HasSuffix(strings.TrimSpace(line), "|") {
+			row := strings.Trim(strings.TrimSpace(line), "|")
+			if strings.Trim(row, " |-:") == "" {
+				continue
+			}
+			fields := strings.Split(row, "|")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+			line = "  " + strings.Join(fields, "  ")
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
 // Inject applies parsed help fields onto a cobra.Command.
 func (ht *HelpText) Inject(cmd *cobra.Command) {
 	cmd.Use = ht.Use
 	cmd.Short = ht.Short
-	cmd.Long = ht.Long
-	cmd.Example = ht.Example
+	cmd.Long = terminalHelpText(ht.Long)
+	cmd.Example = terminalHelpText(ht.Example)
 	if len(ht.Aliases) > 0 {
 		cmd.Aliases = ht.Aliases
 	}
@@ -189,7 +239,7 @@ func (ht *HelpText) Inject(cmd *cobra.Command) {
 		if cmd.Annotations == nil {
 			cmd.Annotations = make(map[string]string)
 		}
-		cmd.Annotations["output"] = ht.Output
+		cmd.Annotations["output"] = terminalHelpText(ht.Output)
 	}
 }
 
@@ -209,39 +259,31 @@ func MustParse(name string) *HelpText {
 
 const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
 
-{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}
-{{if .Example}}
-
+{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}{{if .Example}}
 示例:
 {{.Example}}
-{{end}}
-{{with index .Annotations "output"}}
+{{end}}{{with index .Annotations "output"}}
 
 输出:
 {{.}}
 {{end}}`
 
-const usageTemplate = `用法: {{.UseLine}}
+const usageTemplate = `用法: {{.UseLine}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
 
-{{if .HasAvailableSubCommands}}
-可用命令:
-{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}
-{{end}}
-{{if .HasAvailableLocalFlags}}
+可用命令:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{$group.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
 选项:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}
-{{if .HasAvailableInheritedFlags}}
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
 全局选项:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}
-{{if .HasHelpSubCommands}}
-更多帮助命令:
-{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}
-{{end}}
-{{if .HasAvailableSubCommands}}
-使用 "{{.CommandPath}} [命令] --help" 获取更多信息
-{{end}}
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+更多帮助命令:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+使用 "{{.CommandPath}} [命令] --help" 获取更多信息{{end}}
 `

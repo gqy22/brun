@@ -3,7 +3,7 @@ use: "brun"
 short: "bio-runner: 面向生物信息学的运行记录与日志管理工具"
 example: |
   # 快速上手：后台运行命令
-  brun run -- bwa mem -t 16 ref.fa reads.fq > aligned.sam
+  brun run -- sh -c 'bwa mem -t 16 ref.fa reads.fq > aligned.sam'
 
   # 查看运行历史
   brun list

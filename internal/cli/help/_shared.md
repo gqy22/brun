@@ -4,7 +4,7 @@
 
 ## Run ID 格式
 
-每次运行生成唯一标识：`YYYYMMDD-HHMMSS-xxxxxx`（12 位时间戳 + 6 位随机 hex）。
+每次运行生成唯一标识：`YYYYMMDD-HHMMSS-xxxxxx`（14 位数字时间戳 + 6 位随机 hex）。
 示例：`20260605-145615-fed727`
 
 支持 `--latest` 代替显式指定，取创建时间最近的一条记录。

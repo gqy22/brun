@@ -1,5 +1,5 @@
 ---
-use: "tag <run_id> TAG..."
+use: "tag [<run_id> | --latest] TAG..."
 short: "添加标签"
 long: |
   为指定 run 添加标签。标签格式自由文本，推荐使用 key:value 格式便于过滤
