@@ -34,12 +34,13 @@ output: |
   | 列名 | 说明 |
   |------|------|
   | RUN ID | 唯一标识 (YYYYMMDD-HHMMSS-xxxxxx) |
-  | NAME | 用户指定的名称 |
+  | NAME | 用户指定的名称（宽屏且结果中存在名称时显示） |
   | PROJECT | 项目名 |
   | STATUS | 运行状态 (见下方状态值说明) |
   | DIAG | 诊断摘要 (E=N错误 W=N警告 -=无诊断) |
   | DURATION | 运行时长 |
   | COMMAND | 执行的命令（截断显示） |
+  | CWD | 命令的运行目录，显示在命令下方 |
 
   状态值包含基础状态 (running/success/failed/cancelled) 及其 warnings 变体，
   如 success_with_warnings 表示命令成功但诊断链路存在 warning。

@@ -14,14 +14,15 @@ import (
 )
 
 type RunRow struct {
-	ID           string
-	Name         string
-	Project      string
-	Status       string
+	ID            string
+	Name          string
+	Project       string
+	Status        string
 	DisplayStatus string
-	Diagnostic   string
-	Duration     string
-	Command      string
+	Diagnostic    string
+	Duration      string
+	Command       string
+	CWD           string
 }
 
 type RunDetail struct {
@@ -118,97 +119,206 @@ func ReadScriptSnapshot(runDir string) (ScriptSnapshot, error) {
 }
 
 func FormatRunList(runs []RunRow) string {
+	return formatRunList(runs, getTermWidth())
+}
+
+const runListIDWidth = 24
+
+func formatRunList(runs []RunRow, termWidth int) string {
 	if len(runs) == 0 {
 		return Gray("未找到运行记录。\n")
 	}
 	var b strings.Builder
-	b.WriteString(TableHeader("%-24s %-16s %-15s %-22s %-6s %-10s\n",
-		"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION"))
-	b.WriteString(Dim("----                     ----            -------         ------                ----   --------\n"))
+	stacked := termWidth > 0 && termWidth < 78
+	hasNames := false
 	for _, r := range runs {
-		name := r.Name
-		if len(name) > 12 {
-			name = name[:9] + "..."
+		if r.Name != "" {
+			hasNames = true
+			break
 		}
-		statusLabel := r.Status
-		if r.DisplayStatus != "" && r.DisplayStatus != r.Status {
-			statusLabel = r.Status + "(+" + strings.TrimPrefix(r.DisplayStatus, r.Status+"_") + ")"
-		}
-		fmt.Fprintf(&b, "%s %s %s %s %s %s\n",
-			PadRight(r.ID, 24),
-			PadRight(name, 16),
-			PadRight(r.Project, 15),
-			PadRight(StatusColor(statusLabel), 22),
-			PadRight(r.Diagnostic, 6),
-			PadRight(r.Duration, 10))
+	}
+	wideMinWidth := 90
+	if hasNames {
+		wideMinWidth = 92
+	}
+	compact := termWidth > 0 && termWidth < wideMinWidth
 
-		// Command as hanging block below the row
-		wrapped := wrapCommand(r.Command)
-		for i, line := range wrapped {
-			if i == 0 {
-				fmt.Fprintf(&b, "  %s\n", Dim(line))
-			} else {
-				fmt.Fprintf(&b, "    %s\n", Dim(line))
+	var headers []string
+	var widths []int
+	if stacked {
+		headers = []string{"RUN ID", "STATUS", "DURATION"}
+		widths = []int{runListIDWidth, 20, 10}
+	} else if compact {
+		headers = []string{"RUN ID", "PROJECT", "STATUS", "DIAG", "DURATION"}
+		widths = []int{runListIDWidth, runListMax(14, termWidth-64), 20, 6, 10}
+	} else {
+		headers, widths = wideRunListColumns(termWidth, hasNames)
+	}
+	b.WriteString(Bold(formatTableRow(headers, widths)))
+	b.WriteByte('\n')
+	b.WriteString(Dim(formatTableDivider(widths)))
+	b.WriteByte('\n')
+
+	for _, r := range runs {
+		statusLabel := DisplayStatusLabel(r.Status, r.DisplayStatus)
+		var values []string
+		if stacked {
+			values = []string{RunIDColor(r.ID), StatusColor(statusLabel), DurationColor(r.Status, r.Duration)}
+			b.WriteString(formatTableRow(values, widths))
+			b.WriteByte('\n')
+			fmt.Fprintf(&b, "  %s %s  %s %s\n",
+				Dim("project:"), ProjectColor(r.Project), Dim("diag:"), DiagnosticColor(r.Diagnostic))
+		} else if compact {
+			values = []string{
+				RunIDColor(r.ID), ProjectColor(r.Project), StatusColor(statusLabel),
+				DiagnosticColor(r.Diagnostic), DurationColor(r.Status, r.Duration),
 			}
+			b.WriteString(formatTableRow(values, widths))
+			b.WriteByte('\n')
+		} else {
+			values = []string{RunIDColor(r.ID)}
+			if hasNames {
+				values = append(values, NameColor(r.Name))
+			}
+			values = append(values,
+				ProjectColor(r.Project), StatusColor(statusLabel),
+				DiagnosticColor(r.Diagnostic), DurationColor(r.Status, r.Duration))
+			b.WriteString(formatTableRow(values, widths))
+			b.WriteByte('\n')
+		}
+		if compact && r.Name != "" {
+			fmt.Fprintf(&b, "  %s %s\n", Dim("name:"), NameColor(r.Name))
+		}
+
+		writeRunListDetail(&b, "cmd", r.Command, termWidth)
+		if r.CWD != "" {
+			writeRunListDetail(&b, "cwd", r.CWD, termWidth)
 		}
 	}
 	return b.String()
 }
 
-// wrapCommand splits a command into lines fitting within terminal width.
-// Prefers breaking at spaces and --flag boundaries; falls back to hard break.
-// When stdout is not a TTY (width=0), returns the command unwrapped.
-func wrapCommand(cmd string) []string {
-	width := getTermWidth()
-	if width == 0 || len(cmd) <= width-2 {
-		return []string{cmd}
+func wideRunListColumns(termWidth int, hasNames bool) ([]string, []int) {
+	if !hasNames {
+		projectWidth := 36
+		if termWidth > 0 {
+			projectWidth = runListMin(36, runListMax(14, termWidth-64))
+		}
+		return []string{"RUN ID", "PROJECT", "STATUS", "DIAG", "DURATION"},
+			[]int{runListIDWidth, projectWidth, 20, 6, 10}
 	}
 
-	firstLineWidth := width - 2
-	contLineWidth := width - 4
+	nameWidth, projectWidth := 24, 36
+	if termWidth > 0 {
+		extra := runListMax(0, termWidth-91)
+		nameExtra := runListMin(12, extra/2)
+		projectExtra := runListMin(22, extra-nameExtra)
+		nameWidth = 12 + nameExtra
+		projectWidth = 14 + projectExtra
+	}
+	return []string{"RUN ID", "NAME", "PROJECT", "STATUS", "DIAG", "DURATION"},
+		[]int{runListIDWidth, nameWidth, projectWidth, 20, 6, 10}
+}
 
-	var lines []string
-	remaining := cmd
-
-	for len(remaining) > 0 {
-		lineWidth := firstLineWidth
-		if len(lines) > 0 {
-			lineWidth = contLineWidth
+func formatTableRow(values []string, widths []int) string {
+	cells := make([]string, len(widths))
+	for i, width := range widths {
+		if i < len(values) {
+			cells[i] = PadRight(values[i], width)
+		} else {
+			cells[i] = strings.Repeat(" ", width)
 		}
+	}
+	return strings.Join(cells, " ")
+}
 
-		if len(remaining) <= lineWidth {
+func formatTableDivider(widths []int) string {
+	parts := make([]string, len(widths))
+	for i, width := range widths {
+		parts[i] = strings.Repeat("-", width)
+	}
+	return strings.Join(parts, " ")
+}
+
+func runListMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func runListMax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func DisplayStatusLabel(status, displayStatus string) string {
+	if displayStatus == "" || displayStatus == status {
+		return status
+	}
+	suffix := strings.TrimPrefix(displayStatus, status+"_")
+	suffix = strings.TrimPrefix(suffix, "with_")
+	return status + "(+" + suffix + ")"
+}
+
+func writeRunListDetail(b *strings.Builder, label, value string, termWidth int) {
+	prefix := "  " + label + ": "
+	lineWidth := 0
+	if termWidth > 0 {
+		lineWidth = termWidth - visibleWidth(prefix)
+	}
+	lines := wrapDisplayText(value, lineWidth)
+	for i, line := range lines {
+		if i == 0 {
+			fmt.Fprintf(b, "  %s%s %s\n", DetailLabelColor(label), Dim(":"), Dim(line))
+		} else {
+			fmt.Fprintf(b, "%s%s\n", strings.Repeat(" ", visibleWidth(prefix)), Dim(line))
+		}
+	}
+}
+
+// wrapDisplayText wraps plain text to terminal cells. It prefers whitespace
+// boundaries and only hard-wraps when one token is wider than the line.
+func wrapDisplayText(text string, width int) []string {
+	if width <= 0 || visibleWidth(text) <= width {
+		return []string{text}
+	}
+	var lines []string
+	remaining := text
+	for remaining != "" {
+		if visibleWidth(remaining) <= width {
 			lines = append(lines, remaining)
 			break
 		}
-
-		breakIdx := findBreakPoint(remaining[:lineWidth+1], lineWidth)
-		lines = append(lines, remaining[:breakIdx])
-		remaining = strings.TrimSpace(remaining[breakIdx:])
+		head, tail := splitDisplayWidth(remaining, width)
+		if breakAt := strings.LastIndexByte(head, ' '); breakAt > len(head)/2 {
+			tail = remaining[breakAt+1:]
+			head = head[:breakAt]
+		} else if breakAt := strings.LastIndexByte(head, '/'); breakAt > len(head)/2 {
+			tail = remaining[breakAt+1:]
+			head = head[:breakAt+1]
+		}
+		lines = append(lines, strings.TrimSpace(head))
+		remaining = strings.TrimSpace(tail)
 	}
-
 	return lines
 }
 
-// findBreakPoint finds best position to break within limit chars.
-// Priority: space before "--flag" > any space > hard cut at limit.
-func findBreakPoint(s string, limit int) int {
-	if len(s) <= limit {
-		return len(s)
-	}
-
-	// Prefer breaking before a --flag (must have space or string-start before --)
-	for i := limit - 1; i >= 2; i-- {
-		if s[i] == '-' && s[i-1] == '-' && (i == 2 || s[i-2] == ' ') {
-			return i - 1
+func splitDisplayWidth(s string, width int) (string, string) {
+	used := 0
+	for i, r := range s {
+		runeWidth := visibleWidth(string(r))
+		if used+runeWidth > width {
+			if i == 0 {
+				return string(r), s[len(string(r)):]
+			}
+			return s[:i], s[i:]
 		}
+		used += runeWidth
 	}
-
-	lastSpace := strings.LastIndex(s[:limit], " ")
-	if lastSpace > limit/2 {
-		return lastSpace
-	}
-
-	return limit
+	return s, ""
 }
 
 // getTermWidth returns terminal columns for stdout.

@@ -3,6 +3,7 @@ module github.com/biotools/brun
 go 1.25.1
 
 require (
+	github.com/mattn/go-runewidth v0.0.24
 	github.com/shirou/gopsutil/v4 v4.26.5
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
@@ -10,6 +11,7 @@ require (
 )
 
 require (
+	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect

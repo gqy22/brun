@@ -75,6 +75,7 @@ func listCmd() *cobra.Command {
 					Diagnostic:    diag,
 					Duration:      cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
 					Command:       r.Command,
+					CWD:           r.CWD,
 				}
 			}
 			fmt.Print(cmd.FormatRunList(rows))
@@ -390,7 +391,7 @@ func formatScriptHeader(r *internal.Run, snap cmd.ScriptSnapshot) string {
 	duration := cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs)
 	statusLabel := r.Status
 	if ds := r.DisplayStatus(); ds != "" && ds != r.Status {
-		statusLabel = statusLabel + "(+" + strings.TrimPrefix(ds, r.Status+"_") + ")"
+		statusLabel = cmd.DisplayStatusLabel(r.Status, ds)
 	}
 	fmt.Fprintf(&b, " │ %s │ %s", cmd.StatusColor(statusLabel), duration)
 
