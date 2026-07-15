@@ -198,6 +198,26 @@ func executeRun(args []string, name, project, note string, tags []string,
 	fmt.Printf("日志: %s\n", runDir)
 	internal.Log().Info("run_started", "run_id", runID, "project", projName, "command", commandStr, "cwd", cwd)
 
+	var resourceScope resourcepkg.Scope
+	if resourceDecision.Backend == resourcepkg.BackendCgroupV2 {
+		scope, prepareErr := resourcepkg.NewCgroupScope(resourceDecision.Env, runID)
+		if prepareErr != nil {
+			if resourceDecision.Requested == string(resourcepkg.ModeCgroup) {
+				return cliError("cgroup_create_failed", "创建 run cgroup 失败: "+prepareErr.Error(), "检查 systemd Delegate、可用 controller 和当前 scope", prepareErr)
+			}
+			resourceDecision.Backend = resourcepkg.BackendProc
+			resourceDecision.Fallback = "cgroup_create_failed"
+			diagnostics.Warning("resource_backend_fallback", "cgroup 创建失败，已降级到 proc", prepareErr.Error())
+		} else {
+			resourceScope = scope
+			defer func() {
+				if err := scope.Close(); err != nil {
+					internal.Log().Warn("cgroup_cleanup_failed", "run_id", runID, "path", scope.Path(), "error", err.Error())
+				}
+			}()
+		}
+	}
+
 	// 8. 打开 DB，写入 running 记录
 	store, err := openStore()
 	if err != nil {
@@ -237,7 +257,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 		ResourceSupported: resourceDecision.Backend != resourcepkg.BackendUnsupported,
 	}
 	if resourceDecision.Backend == resourcepkg.BackendCgroupV2 {
-		runRecord.ResourceCgroupPath = resourceDecision.Env.CurrentPath
+		runRecord.ResourceCgroupPath = resourceScope.Path()
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
@@ -266,7 +286,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 			DurationMs:        0,
 			StartedAt:         now,
 			EndedAt:           time.Now().UTC().Format(time.RFC3339),
-			ResourceSupported: cmd.ResourceSupported(),
+			ResourceSupported: runRecord.ResourceSupported,
 			ResourceStatus:    "unavailable",
 		}
 		if err := finishRun(store, diagnostics, runRecord, result, "failed"); err != nil {
@@ -302,7 +322,15 @@ func executeRun(args []string, name, project, note string, tags []string,
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, func(metadata cmd.ProcessMetadata) error {
+	onStarted := func(metadata cmd.ProcessMetadata) error {
+		if resourceScope != nil {
+			if err := resourceScope.Attach(metadata.PID); err != nil {
+				return fmt.Errorf("attach payload to cgroup: %w", err)
+			}
+			if err := resourceScope.Verify(metadata.PID); err != nil {
+				return fmt.Errorf("verify payload cgroup: %w", err)
+			}
+		}
 		if err := store.MarkRunRunning(runID, metadata.PID, metadata.PGID, int64(metadata.StartTimeTicks)); err != nil {
 			return err
 		}
@@ -311,7 +339,30 @@ func executeRun(args []string, name, project, note string, tags []string,
 		runRecord.ProcessPGID = metadata.PGID
 		runRecord.ProcessStartTicks = int64(metadata.StartTimeTicks)
 		return os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(cmd.BuildMetadataYAML(runRecord)), 0o644)
-	})
+	}
+	var result cmd.RunResult
+	if resourceScope != nil {
+		result = cmd.ExecuteGatedCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, onStarted)
+		stats, statsErr := resourceScope.Stats()
+		if statsErr != nil {
+			result.ResourceSupported = true
+			result.ResourceStatus = "unavailable"
+			diagnostics.Warning("cgroup_stats_failed", "cgroup 统计读取失败", statsErr.Error())
+		} else {
+			result.ResourceSupported = true
+			result.ResourceStatus = "ok"
+			result.CPUTimeMs = stats.CPUTimeMs
+			result.MemoryPeakBytes = stats.MemoryPeakByte
+			result.CPUUserMs = stats.CPUUserMs
+			result.CPUSystemMs = stats.CPUSystemMs
+			result.IOReadBytes = stats.IOReadBytes
+			result.IOWriteBytes = stats.IOWriteBytes
+			result.OOMKillCount = stats.OOMKillCount
+			result.PIDsPeak = stats.PIDsPeak
+		}
+	} else {
+		result = cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, onStarted)
+	}
 	if result.TerminationReason != "" {
 		detail := fmt.Sprintf("reason=%s signal=%s escalated=%t", result.TerminationReason, result.TerminationSignal, result.TerminationEscalated)
 		switch result.TerminationReason {
@@ -439,10 +490,6 @@ func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, ru
 	if err != nil {
 		return fmt.Errorf("更新状态失败: %w", err)
 	}
-	if err := store.UpdateRunResources(runRecord.ID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus); err != nil {
-		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
-	}
-
 	if changed {
 		runRecord.Status = status
 		runRecord.ExitCode = result.ExitCode
@@ -458,6 +505,16 @@ func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, ru
 	runRecord.CPUTimeMs = result.CPUTimeMs
 	runRecord.ResourceSupported = result.ResourceSupported
 	runRecord.ResourceStatus = result.ResourceStatus
+	runRecord.MemoryPeakBytes = result.MemoryPeakBytes
+	runRecord.CPUUserMs = result.CPUUserMs
+	runRecord.CPUSystemMs = result.CPUSystemMs
+	runRecord.IOReadBytes = result.IOReadBytes
+	runRecord.IOWriteBytes = result.IOWriteBytes
+	runRecord.OOMKillCount = result.OOMKillCount
+	runRecord.PIDsPeak = result.PIDsPeak
+	if err := store.UpdateRunResourceMetrics(runRecord.ID, runRecord); err != nil {
+		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
+	}
 	if summary, err := internal.ReadDiagnosticSummary(runRecord.RunDir); err == nil {
 		runRecord.DiagInfoCount = summary.InfoCount
 		runRecord.DiagWarningCount = summary.WarningCount

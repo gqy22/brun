@@ -22,6 +22,13 @@ type RunResult struct {
 	CPUTimeMs            int64
 	ResourceSupported    bool
 	ResourceStatus       string
+	MemoryPeakBytes      int64
+	CPUUserMs            int64
+	CPUSystemMs          int64
+	IOReadBytes          int64
+	IOWriteBytes         int64
+	OOMKillCount         int64
+	PIDsPeak             int64
 	TerminationReason    string
 	TerminationSignal    string
 	TerminationEscalated bool
