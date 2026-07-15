@@ -1,0 +1,13 @@
+schema: 1
+id: bcftools.sample-subset-tags
+guide: bcftools.sample-subset-tags
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - ac_an_updated_after_sample_subset
+  - no_update_preserves_original_tags

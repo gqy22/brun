@@ -1,4 +1,4 @@
-.PHONY: build test clean guide-data guide-verify guide-bench \
+.PHONY: build test clean guide-data guide-verify guide-bench guide-bench-concat \
 	release release-all upx FORCE \
 	release-linux-amd64 release-linux-arm64 \
 	release-darwin-arm64 release-darwin-amd64
@@ -13,6 +13,7 @@ TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 
 DATA_TIER     = $(if $(strip $(TIER)),$(TIER),correctness)
 BENCH_TIER    = $(if $(strip $(TIER)),$(TIER),smoke)
+BENCH_CASE    = $(if $(strip $(CASE)),$(CASE),bcftools.pipeline-benchmark)
 BENCH_REPEATS = $(if $(strip $(REPEATS)),$(REPEATS),$(if $(filter medium,$(BENCH_TIER)),1,3))
 BENCH_WARMUPS = $(if $(strip $(WARMUPS)),$(WARMUPS),$(if $(filter medium,$(BENCH_TIER)),0,1))
 
@@ -37,9 +38,19 @@ guide-verify:
 	go run ./guide/cmd/data --tier correctness
 	./guide/scripts/bcftools/verify.sh
 
-guide-bench:
+guide-bench: build
 	go run ./guide/cmd/data --tier $(BENCH_TIER)
-	./guide/scripts/bcftools/bench-pipeline.sh --tier $(BENCH_TIER) --warmups $(BENCH_WARMUPS) --repeats $(BENCH_REPEATS)
+	./bin/brun run -f --no-fs-diff --cwd $(CURDIR) \
+		-n guide-$(BENCH_CASE)-$(BENCH_TIER) -p brun -t guide,benchmark \
+		-- go run ./guide/cmd/bench --tier $(BENCH_TIER) --warmups $(BENCH_WARMUPS) --repeats $(BENCH_REPEATS) $(BENCH_CASE)
+
+guide-bench-concat: build
+	go run ./guide/cmd/data --tier medium
+	./bin/brun run -f --no-fs-diff --cwd $(CURDIR) \
+		-n guide-bcftools-concat-medium -p brun -t guide,benchmark \
+		-- go run ./guide/cmd/bench --tier medium --warmups $(if $(strip $(WARMUPS)),$(WARMUPS),0) \
+			--repeats $(if $(strip $(REPEATS)),$(REPEATS),1) \
+			$(if $(strip $(THREADS)),--matrix threads=$(THREADS),) bcftools.concat-benchmark
 
 clean:
 	rm -rf $(BINDIR)/

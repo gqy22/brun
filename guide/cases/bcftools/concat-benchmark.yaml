@@ -1,0 +1,66 @@
+schema: 1
+id: bcftools.concat-benchmark
+guide: bcftools.concat-vs-merge
+datasets:
+  - igsr-grch38-wgs-sites
+requires:
+  tools:
+    - bcftools
+    - /usr/bin/time
+    - bash
+assertions:
+  - commands_succeed
+  - decoded_records_equal
+  - wall_time_recorded
+  - peak_rss_recorded
+
+benchmark:
+  baseline: standard-threads-1
+  datasets:
+    medium: igsr-grch38-wgs-sites
+  setup:
+    command:
+      - bash
+      - guide/scripts/bcftools/prepare-concat.sh
+      - --input
+      - "{input}"
+      - --parts
+      - "{cache}/datasets/{dataset}/concat-parts"
+  warmups: 0
+  repeats: 1
+  order: balanced
+  cache_policy: uncontrolled
+  output_extension: .vcf.gz
+  versions:
+    - name: bcftools_htslib
+      command: [bcftools, --version]
+  variants:
+    - id: standard
+      matrix:
+        threads: ["1", "2", "4"]
+      command:
+        - bcftools
+        - concat
+        - --no-version
+        - -Oz
+        - --threads
+        - "{threads}"
+        - -o
+        - "{output}"
+        - -f
+        - "{cache}/datasets/{dataset}/concat-parts/files.list"
+    - id: naive
+      command:
+        - bcftools
+        - concat
+        - --no-version
+        - --naive
+        - -Oz
+        - -o
+        - "{output}"
+        - -f
+        - "{cache}/datasets/{dataset}/concat-parts/files.list"
+  checks:
+    - id: decoded-records-sha256
+      type: stdout-sha256-equal
+      command: [bcftools, view, --no-version, -H, "{output}"]

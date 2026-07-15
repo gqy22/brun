@@ -29,7 +29,8 @@ evidence:
       checked: "2026-07-15"
   validations:
     - bcftools.concat-vs-merge
-  benchmarks: []
+  benchmarks:
+    - bcftools.concat-2026-07-15
 updated: "2026-07-15"
 ---
 

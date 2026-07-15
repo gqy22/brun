@@ -4,13 +4,62 @@ guide: bcftools.pipeline-uncompressed
 datasets:
   - igsr-grch38-chrx
   - igsr-grch38-wgs-sites
-script: scripts/bcftools/bench-pipeline.sh
 requires:
   tools:
     - bcftools
     - /usr/bin/time
+    - bash
 assertions:
   - commands_succeed
   - records_equal
   - wall_time_recorded
   - peak_rss_recorded
+
+benchmark:
+  baseline: compressed-intermediate
+  datasets:
+    smoke: igsr-grch38-chrx
+    medium: igsr-grch38-wgs-sites
+  warmups: 1
+  repeats: 3
+  order: balanced
+  cache_policy: uncontrolled
+  output_extension: .vcf.gz
+  variables:
+    threads: "1"
+  versions:
+    - name: bcftools_htslib
+      command: [bcftools, --version]
+  variants:
+    - id: compressed-intermediate
+      command:
+        - bash
+        - -o
+        - pipefail
+        - -c
+        - >-
+          rm -f "$2" "$4";
+          bcftools view -i 'TYPE="snp"' -Oz --threads "$1" -o "$2" "$3" &&
+          bcftools view -Oz --threads "$1" -o "$4" "$2"
+        - _
+        - "{threads}"
+        - "{work}/intermediate.vcf.gz"
+        - "{input}"
+        - "{output}"
+    - id: uncompressed-bcf
+      command:
+        - bash
+        - -o
+        - pipefail
+        - -c
+        - >-
+          bcftools view -i 'TYPE="snp"' -Ou "$2" |
+          bcftools view -Oz --threads "$1" -o "$3"
+        - _
+        - "{threads}"
+        - "{input}"
+        - "{output}"
+  checks:
+    - id: decoded-records-sha256
+      type: stdout-sha256-equal
+      command: [bcftools, view, --no-version, -H, "{output}"]

@@ -116,6 +116,55 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：schema 升至 v7 并加入 `hostname_status` / `username_status` 的迁移回填。v5 → v7 升级时，对已存在的 `runs` 行执行：`hostname`/`username` 非空则回填 `ok`，否则回填 `unavailable`；`WHERE *_status IS NULL` 限定保证幂等，老库升级一次即可，不再二次改写。
 
+## 中长期：基于 cgroup v2 的精确资源统计
+
+### 定位与当前决策
+
+当前 Linux 资源采样通过 `/proc` 定期遍历进程组，已经能为日常运行记录近似的 CPU 时间和峰值
+内存，但采样间隔内退出的短进程可能被漏记，瞬时内存峰值也可能低估。
+
+cgroup v2 的目标是准确累计一条命令及其所有子进程的 CPU、内存、进程数和可用时的 I/O，
+为历史运行比较和长期性能分析提供更可靠的数据。它不会让被执行的工具运行得更快，也不是
+bcftools 经验验证和 benchmark 脚本的前置条件。
+
+当前决定：**先继续完善经验与测试体系，暂缓实现 cgroup 后端**。现阶段 benchmark 继续使用
+`/usr/bin/time -v` 和原始逐轮数据；只有下列需求实际出现后再启动 cgroup 实现：
+
+- `/proc` 采样对短生命周期子进程产生明显漏算。
+- 需要把一次 `brun run` 的完整进程树作为统一计量边界。
+- 需要在历史 run 中稳定比较 CPU 核时、峰值内存、OOM、进程峰值或 I/O。
+- benchmark 结果表明现有计时方式不足以支撑结论。
+
+### 预估实现
+
+优先评估 `github.com/containerd/cgroups/v3/cgroup2`，用现成 API 完成 cgroup 的创建、进程加入、
+统计读取和清理；systemd 委派与 cgroup 操作保持为两个独立层次：
+
+```text
+systemd Delegate=yes       提供当前用户可写的 cgroup 子树
+containerd/cgroups        管理每个 run 的 cgroup 和读取统计
+现有 /proc sampler        无委派、非 Linux 或创建失败时的兼容后端
+```
+
+本机已验证以下入口可以获得普通用户可写的临时 cgroup，无需让 brun 以 root 运行：
+
+```bash
+systemd-run --user --scope --same-dir --property=Delegate=yes -- brun run -- <command>
+```
+
+第一阶段只替换现有 `peak_rss_kb` 和 `cpu_time_ms` 的采集来源，不修改存储模型；验证稳定后再考虑
+增加 `resource_backend`、CPU 核时、平均占用核数、I/O、OOM 和进程峰值。任何实现都必须保留
+自动降级，不能让 cgroup 或 systemd 成为 `brun run` 的强制依赖。
+
+### 验收标准
+
+- [ ] 普通用户通过 systemd 委派运行，不要求 root、sudo 或全局 cgroup 写权限。
+- [ ] 被测命令及其所有后代在执行有效载荷前进入同一个 run cgroup。
+- [ ] CPU 时间和峰值内存由内核累计统计，短生命周期子进程不会因轮询间隔丢失。
+- [ ] cgroup 不可用时无行为中断地降级到现有 `/proc` sampler，并显式记录采集后端或状态。
+- [ ] 超时、SIGTERM、SIGKILL、后台运行和异常退出后均不会遗留 brun 创建的 cgroup。
+- [ ] 单元测试覆盖统计映射和降级逻辑；Linux 集成测试覆盖创建、入组、子进程统计与清理。
+
 ## 中长期：任务调度与依赖运行
 
 ### 背景

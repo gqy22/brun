@@ -37,6 +37,8 @@ license: IGSR open data; see provider terms
 accessed: "2026-07-14"
 used_by:
   guides:
+    - bcftools.concat-vs-merge
     - bcftools.pipeline-uncompressed
   cases:
+    - bcftools.concat-benchmark
     - bcftools.pipeline-benchmark

@@ -1,0 +1,12 @@
+schema: 1
+id: bcftools.index-csi-tbi
+guide: bcftools.index-csi-tbi
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - csi_and_tbi_region_records_equal

@@ -13,11 +13,19 @@ import (
 )
 
 type catalogCase struct {
-	Schema   int      `yaml:"schema"`
-	ID       string   `yaml:"id"`
-	Guide    string   `yaml:"guide"`
-	Datasets []string `yaml:"datasets"`
-	Script   string   `yaml:"script"`
+	Schema    int      `yaml:"schema"`
+	ID        string   `yaml:"id"`
+	Guide     string   `yaml:"guide"`
+	Datasets  []string `yaml:"datasets"`
+	Script    string   `yaml:"script"`
+	Benchmark *struct {
+		Baseline string            `yaml:"baseline"`
+		Datasets map[string]string `yaml:"datasets"`
+		Variants []struct {
+			ID      string   `yaml:"id"`
+			Command []string `yaml:"command"`
+		} `yaml:"variants"`
+	} `yaml:"benchmark"`
 	Requires struct {
 		Tools []string `yaml:"tools"`
 	} `yaml:"requires"`
@@ -111,16 +119,24 @@ func TestCatalogReferencesAreConsistent(t *testing.T) {
 		if len(item.Datasets) == 0 || len(item.Requires.Tools) == 0 || len(item.Assertions) == 0 {
 			t.Errorf("case %s must declare datasets, required tools and assertions", item.ID)
 		}
-		if filepath.IsAbs(item.Script) || strings.HasPrefix(filepath.Clean(item.Script), "..") {
-			t.Errorf("case %s script must stay under guide/: %s", item.ID, item.Script)
-		}
 		for _, id := range item.Datasets {
 			if _, ok := datasetByID[id]; !ok {
 				t.Errorf("case %s references missing dataset %s", item.ID, id)
 			}
 		}
-		if info, err := os.Stat(filepath.Join(root, item.Script)); err != nil || info.IsDir() {
-			t.Errorf("case %s references missing script %s", item.ID, item.Script)
+		if item.Benchmark != nil {
+			if item.Script != "" {
+				t.Errorf("benchmark case %s must not declare a legacy script", item.ID)
+			}
+			if item.Benchmark.Baseline == "" || len(item.Benchmark.Datasets) == 0 || len(item.Benchmark.Variants) < 2 {
+				t.Errorf("benchmark case %s must declare baseline, tier datasets and at least two variants", item.ID)
+			}
+		} else {
+			if item.Script == "" || filepath.IsAbs(item.Script) || strings.HasPrefix(filepath.Clean(item.Script), "..") {
+				t.Errorf("case %s script must stay under guide/: %s", item.ID, item.Script)
+			} else if info, err := os.Stat(filepath.Join(root, item.Script)); err != nil || info.IsDir() {
+				t.Errorf("case %s references missing script %s", item.ID, item.Script)
+			}
 		}
 	}
 

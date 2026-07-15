@@ -25,13 +25,25 @@ accessed: "2026-07-14"
 used_by:
   guides:
     - bcftools.concat-vs-merge
+    - bcftools.filter-sample-logic
+    - bcftools.index-csi-tbi
     - bcftools.pipeline-uncompressed
     - bcftools.parallel-by-contig
     - bcftools.regions-vs-targets
+    - bcftools.query-format
+    - bcftools.sample-subset-tags
+    - bcftools.sort-memory-temp
     - bcftools.split-multiallelic
+    - bcftools.threads-output-compression
   cases:
     - bcftools.concat-vs-merge
+    - bcftools.filter-sample-logic
+    - bcftools.index-csi-tbi
     - bcftools.pipeline-equivalence
     - bcftools.parallel-by-contig
     - bcftools.regions-vs-targets
+    - bcftools.query-format
+    - bcftools.sample-subset-tags
+    - bcftools.sort-memory-temp
     - bcftools.split-multiallelic
+    - bcftools.threads-output-compression

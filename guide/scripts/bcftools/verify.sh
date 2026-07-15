@@ -108,4 +108,85 @@ if bcftools concat -Oz -o "${WORK}/invalid-concat.vcf.gz" \
   exit 1
 fi
 
+# 验证压缩线程不改变解码后的记录。
+bcftools view -Oz --threads 2 -o "${WORK}/threaded.vcf.gz" "${WORK}/input.vcf.gz"
+diff -u \
+  <(bcftools view -H "${WORK}/input.vcf.gz") \
+  <(bcftools view -H "${WORK}/threaded.vcf.gz")
+
+# 验证样本子集默认更新 AC/AN，而 -I 保留原队列统计。
+UPDATED_TAGS="$(
+  bcftools view -s A -r '1:3062915' "${WORK}/input.vcf.gz" |
+    bcftools query -f '%ID\t%INFO/AC\t%INFO/AN\n' |
+    awk '$1 == "idSNP" {print $2 ":" $3}'
+)"
+ORIGINAL_TAGS="$(
+  bcftools view -I -s A -r '1:3062915' "${WORK}/input.vcf.gz" |
+    bcftools query -f '%ID\t%INFO/AC\t%INFO/AN\n' |
+    awk '$1 == "idSNP" {print $2 ":" $3}'
+)"
+[[ "${UPDATED_TAGS}" == "1,0:2" ]] || {
+  echo "样本子集后的 AC/AN 不符: ${UPDATED_TAGS}" >&2
+  exit 1
+}
+[[ "${ORIGINAL_TAGS}" == "1,1:4" ]] || {
+  echo "-I 未保留原 AC/AN: ${ORIGINAL_TAGS}" >&2
+  exit 1
+}
+
+# 验证 query 每条记录输出一行，并按样本展开 GT。
+bcftools query -f '%ID\t%CHROM\t%POS[\t%SAMPLE=%GT]\n' \
+  "${WORK}/input.vcf.gz" > "${WORK}/query.tsv"
+QUERY_RECORDS="$(wc -l < "${WORK}/query.tsv" | tr -d ' ')"
+[[ "${QUERY_RECORDS}" == "${INPUT_RECORDS}" ]] || {
+  echo "query 输出行数不符: ${QUERY_RECORDS} != ${INPUT_RECORDS}" >&2
+  exit 1
+}
+awk -F '\t' '
+  $1 == "idSNP" {
+    if ($4 != "A=0/1" || $5 != "B=0/2") exit 1
+    found = 1
+  }
+  END {if (!found) exit 1}
+' "${WORK}/query.tsv" || {
+  echo "query 样本字段展开结果不符" >&2
+  exit 1
+}
+
+# 验证 && 可由不同样本满足，而 & 要求同一样本同时满足条件。
+SITE_LOGIC_COUNT="$(bcftools view -H -i 'GT="het" && GT="hom"' \
+  "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+SAMPLE_LOGIC_COUNT="$(bcftools view -H -i 'GT="het" & GT="hom"' \
+  "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+[[ "${SITE_LOGIC_COUNT}" == "2" && "${SAMPLE_LOGIC_COUNT}" == "0" ]] || {
+  echo "FORMAT 过滤逻辑验证失败: &&=${SITE_LOGIC_COUNT}, &=${SAMPLE_LOGIC_COUNT}" >&2
+  exit 1
+}
+
+# 验证 CSI 和 TBI 对当前数据产生相同区域查询结果。
+cp "${WORK}/input.vcf.gz" "${WORK}/csi.vcf.gz"
+cp "${WORK}/input.vcf.gz" "${WORK}/tbi.vcf.gz"
+bcftools index --csi "${WORK}/csi.vcf.gz"
+bcftools index --tbi "${WORK}/tbi.vcf.gz"
+[[ -f "${WORK}/csi.vcf.gz.csi" && -f "${WORK}/tbi.vcf.gz.tbi" ]] || {
+  echo "CSI/TBI 索引文件未生成" >&2
+  exit 1
+}
+diff -u \
+  <(bcftools view -H -r '1:3062915-3106154' "${WORK}/csi.vcf.gz") \
+  <(bcftools view -H -r '1:3062915-3106154' "${WORK}/tbi.vcf.gz")
+
+# 验证受限内存和独立临时目录下的 sort 保留记录集合，并产生可索引输出。
+bcftools sort -m 1M -T "${WORK}/sort.XXXXXX" -Oz \
+  -o "${WORK}/sorted-limited.vcf.gz" "${INPUT}"
+bcftools index "${WORK}/sorted-limited.vcf.gz"
+bcftools view -H "${INPUT}" | sort > "${WORK}/unsorted-record-set"
+bcftools view -H "${WORK}/sorted-limited.vcf.gz" | sort > "${WORK}/sorted-record-set"
+diff -u "${WORK}/unsorted-record-set" "${WORK}/sorted-record-set"
+SORTED_RECORDS="$(bcftools index --nrecords "${WORK}/sorted-limited.vcf.gz")"
+[[ "${SORTED_RECORDS}" == "${INPUT_RECORDS}" ]] || {
+  echo "sort 前后记录数不符: ${SORTED_RECORDS} != ${INPUT_RECORDS}" >&2
+  exit 1
+}
+
 printf '验证通过: bcftools %s\n' "$(bcftools --version-only)"

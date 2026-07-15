@@ -1,0 +1,13 @@
+schema: 1
+id: bcftools.query-format
+guide: bcftools.query-format
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - one_row_per_record
+  - sample_fields_expanded
