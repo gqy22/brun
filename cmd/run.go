@@ -159,6 +159,14 @@ func SaveInputScript(runDir, scriptPath string) error {
 
 // ExecuteCommandWithSignal 执行命令并支持信号中断
 func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal, onStarted RunStartedHook) RunResult {
+	return executeCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, onStarted, false)
+}
+
+func ExecuteGatedCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal, onStarted RunStartedHook) RunResult {
+	return executeCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, onStarted, true)
+}
+
+func executeCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal, onStarted RunStartedHook, gated bool) RunResult {
 	start := time.Now()
 
 	stdoutF, _ := os.Create(stdoutPath)
@@ -166,13 +174,18 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	stderrF, _ := os.Create(stderrPath)
 	defer stderrF.Close()
 
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Dir = cwd
-	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutF)
-	cmd.Stderr = io.MultiWriter(os.Stderr, stderrF)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	payload, err := NewPayloadCommand(args, gated)
+	if err != nil {
+		return RunResult{ExitCode: 1, Status: "failed", DurationMs: time.Since(start).Milliseconds(), StartedAt: start.UTC().Format(time.RFC3339), EndedAt: time.Now().UTC().Format(time.RFC3339)}
+	}
+	defer payload.Abort()
+	command := payload.Command
+	command.Dir = cwd
+	command.Stdout = io.MultiWriter(os.Stdout, stdoutF)
+	command.Stderr = io.MultiWriter(os.Stderr, stderrF)
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	err := cmd.Start()
+	err = command.Start()
 	if err != nil {
 		return RunResult{
 			ExitCode:          1,
@@ -184,9 +197,14 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 			ResourceStatus:    resourceStatus(ResourceUsage{}),
 		}
 	}
+	if err := payload.Started(); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return RunResult{ExitCode: 1, Status: "failed", DurationMs: time.Since(start).Milliseconds(), StartedAt: start.UTC().Format(time.RFC3339), EndedAt: time.Now().UTC().Format(time.RFC3339)}
+	}
 	runDir := filepath.Dir(stdoutPath)
 	_ = os.Remove(filepath.Join(runDir, TerminationRecordFile))
-	metadata, metadataErr := NewProcessMetadata(cmd.Process.Pid, cmd.Process.Pid)
+	metadata, metadataErr := NewProcessMetadata(command.Process.Pid, command.Process.Pid)
 	if metadataErr == nil {
 		metadataErr = WriteProcessMetadata(runDir, metadata)
 	}
@@ -194,8 +212,8 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		metadataErr = onStarted(metadata)
 	}
 	if metadataErr != nil {
-		_ = KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
+		_ = KillProcessGroup(command.Process.Pid, syscall.SIGKILL)
+		_ = command.Wait()
 		return RunResult{
 			ExitCode:          1,
 			Status:            "failed",
@@ -206,13 +224,18 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 			ResourceStatus:    "unavailable",
 		}
 	}
+	if err := payload.Release(); err != nil {
+		_ = KillProcessGroup(command.Process.Pid, syscall.SIGKILL)
+		_ = command.Wait()
+		return RunResult{ExitCode: 1, Status: "failed", DurationMs: time.Since(start).Milliseconds(), StartedAt: start.UTC().Format(time.RFC3339), EndedAt: time.Now().UTC().Format(time.RFC3339), ResourceSupported: ResourceSupported(), ResourceStatus: "unavailable"}
+	}
 
 	sampler := StartProcessGroupSampler(metadata.PGID, 500*time.Millisecond)
 
 	// 等待命令完成或收到信号
 	done := make(chan error, 1)
 	go func() {
-		done <- cmd.Wait()
+		done <- command.Wait()
 	}()
 
 	var timeoutChannel <-chan time.Time

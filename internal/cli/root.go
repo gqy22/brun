@@ -58,6 +58,7 @@ func Execute(opts Options) error {
 	addGroupedCommands(rootCmd, "metadata", tagCmd(), noteCmd())
 	addGroupedCommands(rootCmd, "maintenance", cleanCmd(), repairCmd())
 	addGroupedCommands(rootCmd, "tools", webCmd())
+	rootCmd.AddCommand(payloadExecCmd())
 	// 替换内置命令为中文描述
 	rootCmd.SetHelpCommand(&cobra.Command{
 		Use:     "help [command]",
