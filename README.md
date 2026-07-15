@@ -30,6 +30,7 @@
 | 运行检索 | 按 project、status、tag、关键词和时间范围查询历史 |
 | Web Dashboard | 浏览器查看运行状态、日志、输出文件和进程资源 |
 | 复跑与审计 | 从历史记录恢复命令，保留 Git、环境和资源信息 |
+| 内置经验指南 | 离线查看经过验证的生信命令写法、性能建议和常见陷阱 |
 
 ## 安装
 
@@ -267,6 +268,7 @@ http://192.168.1.x:9213
 | `brun logs <id>` | 查看日志 | `brun logs --latest --tail 50 --stderr` |
 | `brun outputs <id>` | 查看输出文件 | `brun outputs --latest` |
 | `brun diag <id>` | 查看运行诊断 | `brun diag --latest --all` |
+| `brun guide` | 查看内置生信命令经验 | `brun guide search "bcftools 并行"` |
 | `brun tag <id> TAG...` | 添加标签 | `brun tag --latest sample:S1 production` |
 | `brun note <id> "text"` | 添加备注 | `brun note --latest "参数说明"` |
 | `brun stop <id>` | 终止运行中的任务 | `brun stop --latest` / `brun stop <id> -f` |
@@ -386,7 +388,7 @@ brun init my-project
 
 ```bash
 # 测试所有真实生物信息学工具的集成
-bash test_e2e/run_all.sh
+bash e2e/run.sh
 
 # 28 项测试覆盖:
 # - Test 1: minimap2 + samtools 排序/flagstat/stats 流水线

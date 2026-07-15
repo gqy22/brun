@@ -17,6 +17,7 @@ func TestParseAllFiles(t *testing.T) {
 		"root", "init", "run", "list", "show", "logs",
 		"outputs", "diag", "stop", "rerun", "tag", "note",
 		"script", "clean", "repair", "web",
+		"guide", "guide-list", "guide-show", "guide-search",
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -228,6 +229,7 @@ func TestCommandHelpRenders(t *testing.T) {
 		"clean":   cleanCmd,
 		"repair":  repairCmd,
 		"web":     webCmd,
+		"guide":   guideCmd,
 	}
 	for name, factory := range cmds {
 		t.Run(name, func(t *testing.T) {

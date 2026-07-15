@@ -1,4 +1,5 @@
-.PHONY: build test clean release release-all upx FORCE \
+.PHONY: build test clean guide-data guide-verify guide-bench \
+	release release-all upx FORCE \
 	release-linux-amd64 release-linux-arm64 \
 	release-darwin-arm64 release-darwin-amd64
 
@@ -9,6 +10,11 @@ SRC     := ./cmd/brun
 BINDIR  := bin
 
 TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
+
+DATA_TIER     = $(if $(strip $(TIER)),$(TIER),correctness)
+BENCH_TIER    = $(if $(strip $(TIER)),$(TIER),smoke)
+BENCH_REPEATS = $(if $(strip $(REPEATS)),$(REPEATS),$(if $(filter medium,$(BENCH_TIER)),1,3))
+BENCH_WARMUPS = $(if $(strip $(WARMUPS)),$(WARMUPS),$(if $(filter medium,$(BENCH_TIER)),0,1))
 
 ## ── 开发 ─────────────────────────────────────────────
 
@@ -22,6 +28,17 @@ test:
 
 test-fast:
 	go test ./... -count=1
+
+guide-data:
+	go run ./guide/cmd/data --tier $(DATA_TIER)
+
+guide-verify:
+	go run ./guide/cmd/data --tier correctness
+	./guide/scripts/bcftools/verify.sh
+
+guide-bench:
+	go run ./guide/cmd/data --tier $(BENCH_TIER)
+	./guide/scripts/bcftools/bench-pipeline.sh --tier $(BENCH_TIER) --warmups $(BENCH_WARMUPS) --repeats $(BENCH_REPEATS)
 
 clean:
 	rm -rf $(BINDIR)/

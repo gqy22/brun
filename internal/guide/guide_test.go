@@ -1,0 +1,89 @@
+package guide
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestLoadEmbeddedEntries(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("Load() returned %d entries, want at least 2", len(entries))
+	}
+	for _, entry := range entries {
+		if entry.SourcePath == "" {
+			t.Fatalf("entry %q has no source path", entry.ID)
+		}
+	}
+}
+
+func TestSearchMatchesMetadataAndBody(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := Search(entries, "bcftools contig")
+	if len(matches) != 1 || matches[0].ID != "bcftools.parallel-by-contig" {
+		t.Fatalf("Search() = %+v, want parallel-by-contig", matches)
+	}
+	if matches := Search(entries, "不存在的关键词"); len(matches) != 0 {
+		t.Fatalf("Search() returned unexpected matches: %+v", matches)
+	}
+}
+
+func TestParseRejectsUnknownMetadata(t *testing.T) {
+	data := strings.Replace(
+		validDocument(),
+		"updated: \"2026-07-14\"",
+		"updated: \"2026-07-14\"\nunknown_field: true",
+		1,
+	)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "unknown_field") {
+		t.Fatalf("Parse() error = %v, want unknown_field error", err)
+	}
+}
+
+func TestParseRejectsMissingSection(t *testing.T) {
+	data := strings.Replace(validDocument(), "## 结果检查\n", "", 1)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "结果检查") {
+		t.Fatalf("Parse() error = %v, want missing section error", err)
+	}
+}
+
+func validDocument() string {
+	return `---
+id: bcftools.example
+title: 示例
+tool: bcftools
+category: workflow
+summary: 示例摘要
+tags: [vcf]
+commands: [view]
+level: basic
+status: tested
+tool_versions:
+  tested: ["1.22.1"]
+  applicable: ">=1.18"
+updated: "2026-07-14"
+---
+## 结论
+x
+## 适用场景
+x
+## 推荐命令
+x
+## 为什么这样做
+x
+## 并行与资源
+x
+## 注意事项
+x
+## 结果检查
+x
+## 依据
+x
+`
+}

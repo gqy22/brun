@@ -21,7 +21,8 @@ vendor/
 *.db-wal
 *.db-shm
 /tmp/
-/test_e2e/__pycache__/
+/.cache/guide-data/
+/e2e/__pycache__/
 
 # IDE
 .idea/

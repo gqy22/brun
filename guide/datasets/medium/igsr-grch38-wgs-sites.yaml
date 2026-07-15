@@ -1,0 +1,41 @@
+id: igsr-grch38-wgs-sites
+tier: medium
+description: IGSR 1000 Genomes GRCh38 双等位 SNV/INDEL 全基因组 sites VCF
+
+source:
+  provider: IGSR / 1000 Genomes Project
+  release: 20190312_biallelic_SNV_and_INDEL
+  format: vcf.gz
+  url: https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/release/20190312_biallelic_SNV_and_INDEL/ALL.wgs.shapeit2_integrated_snvindels_v2a.GRCh38.27022019.sites.vcf.gz
+  filename: ALL.wgs.shapeit2_integrated_snvindels_v2a.GRCh38.27022019.sites.vcf.gz
+  bytes: 977746786
+  checksums:
+    - algorithm: md5
+      value: a96ef90421ad0da9463d352ee4609355
+    - algorithm: sha256
+      value: f15ea3d012329282ab97dcfac96d0e14a917352a7c36512e3e46e0063b955d78
+
+index:
+  format: tbi
+  url: https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/release/20190312_biallelic_SNV_and_INDEL/ALL.wgs.shapeit2_integrated_snvindels_v2a.GRCh38.27022019.sites.vcf.gz.tbi
+  filename: ALL.wgs.shapeit2_integrated_snvindels_v2a.GRCh38.27022019.sites.vcf.gz.tbi
+  bytes: 2108744
+  checksums:
+    - algorithm: md5
+      value: 4b4ded48d78dfcc7c39c8b1a2d3ca3cf
+    - algorithm: sha256
+      value: e3afbe64a3e3809b86fc2325b9ec7170970eb81fbc816a985ff148c3ab10cdea
+
+metadata:
+  assembly: GRCh38
+  records: 78229218
+  samples: 0
+  contigs: 23
+
+license: IGSR open data; see provider terms
+accessed: "2026-07-14"
+usage:
+  - pipeline-medium
+  - compression-threads
+  - parallel-by-contig
+  - view-filter-query

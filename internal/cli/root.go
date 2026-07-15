@@ -54,7 +54,7 @@ func Execute(opts Options) error {
 		&cobra.Group{ID: "tools", Title: "服务与工具:"},
 	)
 	addGroupedCommands(rootCmd, "execution", initCmd(), runCmd(), rerunCmd(), stopCmd())
-	addGroupedCommands(rootCmd, "query", listCmd(), showCmd(), logsCmd(), scriptCmd(), outputsCmd(), diagCmd())
+	addGroupedCommands(rootCmd, "query", listCmd(), showCmd(), logsCmd(), scriptCmd(), outputsCmd(), diagCmd(), guideCmd())
 	addGroupedCommands(rootCmd, "metadata", tagCmd(), noteCmd())
 	addGroupedCommands(rootCmd, "maintenance", cleanCmd(), repairCmd())
 	addGroupedCommands(rootCmd, "tools", webCmd())

@@ -1,0 +1,27 @@
+id: bcftools-check-1.22
+tier: correctness
+description: bcftools 1.22 官方测试仓库中的小型多样本 VCF
+
+source:
+  provider: samtools/bcftools
+  release: "1.22"
+  format: vcf
+  url: https://raw.githubusercontent.com/samtools/bcftools/1.22/test/check.vcf
+  filename: check.vcf
+  bytes: 2742
+  checksums:
+    - algorithm: sha256
+      value: a2253ac7dfc40829c8e8e8fc6b8a7a6635bd0cab42c17a5fc0393f4016d6c866
+
+metadata:
+  assembly: GRCh37
+  records: 18
+  samples: 2
+  contigs: 4
+
+license: MIT/Expat
+accessed: "2026-07-14"
+usage:
+  - command-correctness
+  - result-equivalence
+

@@ -1,0 +1,40 @@
+id: igsr-grch38-chrx
+tier: smoke
+description: IGSR 1000 Genomes GRCh38 双等位 SNV/INDEL chrX 多样本 VCF
+
+source:
+  provider: IGSR / 1000 Genomes Project
+  release: 20190312_biallelic_SNV_and_INDEL
+  format: vcf.gz
+  url: https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/release/20190312_biallelic_SNV_and_INDEL/ALL.chrX.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz
+  filename: ALL.chrX.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz
+  bytes: 24046766
+  checksums:
+    - algorithm: md5
+      value: e6a3d41811faee60de177061edcd6fe6
+    - algorithm: sha256
+      value: 78c8b11e45e2c530fcd4fae31b41572596b5868587c7e11334ec50afb9dd24d2
+
+index:
+  format: tbi
+  url: https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/release/20190312_biallelic_SNV_and_INDEL/ALL.chrX.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz.tbi
+  filename: ALL.chrX.shapeit2_integrated_snvindels_v2a_27022019.GRCh38.phased.vcf.gz.tbi
+  bytes: 2541
+  checksums:
+    - algorithm: md5
+      value: d7dac3b3c41e7d44c65e349c73ed3495
+    - algorithm: sha256
+      value: 68a6b263cc3a6093ae4d8f6aa5c404c73eaf0cc8a170dafc59dc764d7684eb4a
+
+metadata:
+  assembly: GRCh38
+  records: 106963
+  samples: 2548
+  contigs: 1
+
+license: IGSR open data; see provider terms
+accessed: "2026-07-14"
+usage:
+  - pipeline-smoke
+  - compression-threads
+  - sample-filtering
