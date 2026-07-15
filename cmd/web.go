@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 )
 
 const processActivitySampleInterval = 300 * time.Millisecond
@@ -585,6 +586,20 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 
 	// 调用统一的 StopRun，3 秒宽限期
 	result := StopManagedProcess(run.RunDir, metadata, 3, false, "user")
+	if run.ResourceBackend == resourcepkg.BackendCgroupV2 && run.ResourceCgroupPath != "" {
+		cgroupResult, cgroupErr := resourcepkg.TerminateCgroup(run.ResourceCgroupPath, 3*time.Second, false)
+		if cgroupErr != nil {
+			httpError(w, "终止 run cgroup 失败: "+cgroupErr.Error(), 500)
+			return
+		}
+		result.OK = cgroupResult.Empty
+		result.GroupGone = cgroupResult.Empty
+		if cgroupResult.Signal != "" {
+			result.Signal = cgroupResult.Signal
+		}
+		result.Escalated = result.Escalated || cgroupResult.Escalated
+		result.AlreadyDead = false
+	}
 
 	if result.AlreadyDead {
 		_, _ = ReconcileRun(s.store, run)

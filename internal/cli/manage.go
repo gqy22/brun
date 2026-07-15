@@ -9,6 +9,7 @@ import (
 
 	"github.com/biotools/brun/cmd"
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 	webassets "github.com/biotools/brun/web"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -178,6 +179,19 @@ func stopCmd() *cobra.Command {
 
 			// 调用统一的 StopRun，3 秒宽限期
 			result := cmd.StopManagedProcess(run.RunDir, metadata, 3, force, "user")
+			if run.ResourceBackend == resourcepkg.BackendCgroupV2 && run.ResourceCgroupPath != "" {
+				cgroupResult, cgroupErr := resourcepkg.TerminateCgroup(run.ResourceCgroupPath, 3*time.Second, force)
+				if cgroupErr != nil {
+					return cliError("stop_cgroup_failed", "终止 run cgroup 失败: "+cgroupErr.Error(), "检查 cgroup 委派和任务状态", cgroupErr)
+				}
+				result.OK = cgroupResult.Empty
+				result.GroupGone = cgroupResult.Empty
+				if cgroupResult.Signal != "" {
+					result.Signal = cgroupResult.Signal
+				}
+				result.Escalated = result.Escalated || cgroupResult.Escalated
+				result.AlreadyDead = false
+			}
 
 			if result.AlreadyDead {
 				_, _ = cmd.ReconcileRun(store, run)

@@ -116,7 +116,7 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` / `timed_out_with_warnings` 已落地。`Run.DisplayStatus()` 在终态存在 warning 时返回对应 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选和颜色覆盖四种终态。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。
 
-已完成：schema 升至 v7 并加入 `hostname_status` / `username_status` 的迁移回填。v5 → v7 升级时，对已存在的 `runs` 行执行：`hostname`/`username` 非空则回填 `ok`，否则回填 `unavailable`；`WHERE *_status IS NULL` 限定保证幂等，老库升级一次即可，不再二次改写。
+已完成：schema v7 曾加入 `hostname_status` / `username_status` 的迁移回填；当前数据库版本已随资源后端升级至 v9。老库升级时，`hostname`/`username` 非空回填 `ok`，否则回填 `unavailable`；`WHERE *_status IS NULL` 保证迁移幂等。
 
 ## 中长期：基于 cgroup v2 的精确资源统计
 
@@ -129,17 +129,17 @@ cgroup v2 的目标是准确累计一条命令及其所有子进程的 CPU、内
 为历史运行比较和长期性能分析提供更可靠的数据。它不会让被执行的工具运行得更快，也不是
 bcftools 经验验证和 benchmark 脚本的前置条件。
 
-当前决定：**先继续完善经验与测试体系，暂缓实现 cgroup 后端**。现阶段 benchmark 继续使用
-`/usr/bin/time -v` 和原始逐轮数据；只有下列需求实际出现后再启动 cgroup 实现：
+当前决定：**cgroup v2 精确计量后端已经完成第一阶段实现**。benchmark 仍保留
+`/usr/bin/time -v` 和原始逐轮数据作为独立证据；brun 在获得 systemd 委派时额外记录内核累计资源数据：
 
 - `/proc` 采样对短生命周期子进程产生明显漏算。
 - 需要把一次 `brun run` 的完整进程树作为统一计量边界。
 - 需要在历史 run 中稳定比较 CPU 核时、峰值内存、OOM、进程峰值或 I/O。
 - benchmark 结果表明现有计时方式不足以支撑结论。
 
-### 预估实现
+### 当前实现
 
-优先评估 `github.com/containerd/cgroups/v3/cgroup2`，用现成 API 完成 cgroup 的创建、进程加入、
+已采用 `github.com/containerd/cgroups/v3/cgroup2` 完成 cgroup 的创建、进程加入、
 统计读取和清理；systemd 委派与 cgroup 操作保持为两个独立层次：
 
 ```text
@@ -154,18 +154,18 @@ containerd/cgroups        管理每个 run 的 cgroup 和读取统计
 systemd-run --user --scope --same-dir --property=Delegate=yes -- brun run -- <command>
 ```
 
-第一阶段只替换现有 `peak_rss_kb` 和 `cpu_time_ms` 的采集来源，不修改存储模型；验证稳定后再考虑
-增加 `resource_backend`、CPU 核时、平均占用核数、I/O、OOM 和进程峰值。任何实现都必须保留
-自动降级，不能让 cgroup 或 systemd 成为 `brun run` 的强制依赖。
+schema v9 增加 `resource_backend`、cgroup 路径、CPU user/system、`memory_peak_bytes`、I/O、OOM 和
+进程峰值。`peak_rss_kb` 继续只表示 `/proc` 采样 RSS，避免与 cgroup charged memory 混淆。
+`--resource-backend auto` 在无委派时降级到 `/proc` 并记录原因；`cgroup` 强制模式不可用时拒绝执行 payload。
 
 ### 验收标准
 
-- [ ] 普通用户通过 systemd 委派运行，不要求 root、sudo 或全局 cgroup 写权限。
-- [ ] 被测命令及其所有后代在执行有效载荷前进入同一个 run cgroup。
-- [ ] CPU 时间和峰值内存由内核累计统计，短生命周期子进程不会因轮询间隔丢失。
-- [ ] cgroup 不可用时无行为中断地降级到现有 `/proc` sampler，并显式记录采集后端或状态。
-- [ ] 超时、SIGTERM、SIGKILL、后台运行和异常退出后均不会遗留 brun 创建的 cgroup。
-- [ ] 单元测试覆盖统计映射和降级逻辑；Linux 集成测试覆盖创建、入组、子进程统计与清理。
+- [x] 普通用户通过 systemd 委派运行，不要求 root、sudo 或全局 cgroup 写权限。
+- [x] 被测命令及其所有后代在执行有效载荷前进入同一个 run cgroup。
+- [x] CPU 时间和峰值内存由内核累计统计，短生命周期子进程不会因轮询间隔丢失。
+- [x] cgroup 不可用时无行为中断地降级到现有 `/proc` sampler，并显式记录采集后端或状态。
+- [x] 超时、SIGTERM、SIGKILL、后台运行和异常退出路径均有清理与 reconciler 兜底。
+- [x] 单元测试覆盖统计映射和降级逻辑；Linux delegated scope 完成真实创建、入组、统计与清理验证。
 
 ## 中长期：任务调度与依赖运行
 

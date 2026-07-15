@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/containerd/cgroups/v3/cgroup2"
 	cgroupstats "github.com/containerd/cgroups/v3/cgroup2/stats"
@@ -34,6 +36,9 @@ func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
 	if err := writeCgroupValue(filepath.Join(supervisorPath, "cgroup.procs"), strconv.Itoa(os.Getpid())); err != nil {
 		return nil, fmt.Errorf("move supervisor into cgroup: %w", err)
 	}
+	if err := waitCgroupFileEmpty(filepath.Join(env.FullPath, "cgroup.procs"), 3*time.Second); err != nil {
+		return nil, fmt.Errorf("wait for delegated root to become empty: %w", err)
+	}
 	if err := enableControllers(env.FullPath, env.Controllers); err != nil {
 		return nil, fmt.Errorf("enable delegated controllers: %w", err)
 	}
@@ -52,6 +57,35 @@ func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
 		return nil, err
 	}
 	return &CgroupScope{manager: manager, mountpoint: env.Mountpoint, relativePath: relative, fullPath: full}, nil
+}
+
+func waitCgroupFileEmpty(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("cgroup still contains processes: %s", strings.Join(strings.Fields(string(data)), ","))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func LoadCgroupScope(relativePath string) (*CgroupScope, error) {
+	full, err := safeCgroupPath("/sys/fs/cgroup", relativePath)
+	if err != nil {
+		return nil, err
+	}
+	manager, err := cgroup2.Load(relativePath, cgroup2.WithMountpoint("/sys/fs/cgroup"))
+	if err != nil {
+		return nil, err
+	}
+	return &CgroupScope{manager: manager, mountpoint: "/sys/fs/cgroup", relativePath: relativePath, fullPath: full}, nil
 }
 
 func (s *CgroupScope) Backend() string { return BackendCgroupV2 }
@@ -107,6 +141,55 @@ func (s *CgroupScope) Populated() (bool, error) {
 
 func (s *CgroupScope) Kill() error  { return s.manager.Kill() }
 func (s *CgroupScope) Close() error { return s.manager.Delete() }
+
+type CgroupTermination struct {
+	Empty     bool
+	Signal    string
+	Escalated bool
+}
+
+func TerminateCgroup(relativePath string, grace time.Duration, force bool) (CgroupTermination, error) {
+	scope, err := LoadCgroupScope(relativePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return CgroupTermination{Empty: true}, nil
+		}
+		return CgroupTermination{}, err
+	}
+	populated, err := scope.Populated()
+	if err != nil {
+		return CgroupTermination{}, err
+	}
+	if !populated {
+		return CgroupTermination{Empty: true}, nil
+	}
+	result := CgroupTermination{}
+	if !force {
+		procs, listErr := scope.manager.Procs(true)
+		if listErr != nil {
+			return result, listErr
+		}
+		for _, pid := range procs {
+			if signalErr := syscall.Kill(int(pid), syscall.SIGTERM); signalErr != nil && signalErr != syscall.ESRCH {
+				return result, signalErr
+			}
+		}
+		result.Signal = "SIGTERM"
+		if empty, waitErr := WaitEmpty(scope, grace); waitErr != nil {
+			return result, waitErr
+		} else if empty {
+			result.Empty = true
+			return result, nil
+		}
+	}
+	if err := scope.Kill(); err != nil {
+		return result, err
+	}
+	result.Signal = "SIGKILL"
+	result.Escalated = !force
+	result.Empty, err = WaitEmpty(scope, 3*time.Second)
+	return result, err
+}
 
 func statsFromMetrics(metrics *cgroupstats.Metrics) Stats {
 	var result Stats

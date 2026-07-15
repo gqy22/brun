@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 )
 
 const startingReconcileTimeout = 10 * time.Minute
@@ -61,6 +62,31 @@ func ReconcileRun(store *internal.Store, run *internal.Run) (ReconcileResult, er
 		result.Changed = true
 		return result, markReconciledFailed(store, run, result.Reason, err.Error())
 	}
+	if run.ResourceBackend == resourcepkg.BackendCgroupV2 && run.ResourceCgroupPath != "" {
+		scope, loadErr := resourcepkg.LoadCgroupScope(run.ResourceCgroupPath)
+		if loadErr != nil {
+			result.Reason = "cgroup_unavailable"
+			result.Changed = true
+			return result, markReconciledFailed(store, run, result.Reason, loadErr.Error())
+		}
+		populated, populatedErr := scope.Populated()
+		if populatedErr != nil {
+			result.Reason = "cgroup_status_unavailable"
+			result.Changed = true
+			return result, markReconciledFailed(store, run, result.Reason, populatedErr.Error())
+		}
+		if populated {
+			return result, nil
+		}
+		if stats, statsErr := scope.Stats(); statsErr == nil {
+			applyResourceStats(run, stats)
+			_ = store.UpdateRunResourceMetrics(run.ID, run)
+		}
+		_ = scope.Close()
+		result.Reason = "cgroup_empty"
+		result.Changed = true
+		return result, markReconciledFailed(store, run, result.Reason, run.ResourceCgroupPath)
+	}
 	inspection := InspectProcess(metadata)
 	if inspection.RootExists && !inspection.IdentityMatch {
 		result.Reason = "process_identity_mismatch"
@@ -74,6 +100,19 @@ func ReconcileRun(store *internal.Store, run *internal.Run) (ReconcileResult, er
 	result.Reason = "process_group_gone"
 	result.Changed = true
 	return result, markReconciledFailed(store, run, result.Reason, fmt.Sprintf("pgid=%d", metadata.PGID))
+}
+
+func applyResourceStats(run *internal.Run, stats resourcepkg.Stats) {
+	run.ResourceSupported = true
+	run.ResourceStatus = "ok"
+	run.CPUTimeMs = stats.CPUTimeMs
+	run.MemoryPeakBytes = stats.MemoryPeakByte
+	run.CPUUserMs = stats.CPUUserMs
+	run.CPUSystemMs = stats.CPUSystemMs
+	run.IOReadBytes = stats.IOReadBytes
+	run.IOWriteBytes = stats.IOWriteBytes
+	run.OOMKillCount = stats.OOMKillCount
+	run.PIDsPeak = stats.PIDsPeak
 }
 
 func FinalizeRunState(store *internal.Store, run *internal.Run, status string, exitCode int, reason, signal string, escalated bool) error {

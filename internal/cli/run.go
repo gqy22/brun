@@ -343,6 +343,26 @@ func executeRun(args []string, name, project, note string, tags []string,
 	var result cmd.RunResult
 	if resourceScope != nil {
 		result = cmd.ExecuteGatedCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, onStarted)
+		empty, waitErr := resourcepkg.WaitEmpty(resourceScope, 500*time.Millisecond)
+		if waitErr != nil {
+			diagnostics.Warning("cgroup_wait_failed", "等待 run cgroup 清空失败", waitErr.Error())
+		}
+		if !empty {
+			if killErr := resourceScope.Kill(); killErr != nil {
+				diagnostics.Warning("cgroup_kill_failed", "清理 run cgroup 残留进程失败", killErr.Error())
+			} else {
+				_, _ = resourcepkg.WaitEmpty(resourceScope, 3*time.Second)
+			}
+			if result.TerminationReason == "" {
+				result.Status = "failed"
+				result.ExitCode = 1
+				result.TerminationReason = "residual_processes"
+				result.TerminationSignal = "SIGKILL"
+				result.TerminationEscalated = true
+				diagnostics.Warning("cgroup_residual_processes", "根进程退出后仍有后代进程，已清理", resourceScope.Path())
+				_ = cmd.WriteTerminationRecord(runDir, cmd.TerminationRecord{Reason: "residual_processes", Signal: "SIGKILL", Escalated: true})
+			}
+		}
 		stats, statsErr := resourceScope.Stats()
 		if statsErr != nil {
 			result.ResourceSupported = true
@@ -447,7 +467,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 
 	// 13. 确定最终状态 (allow-exit 覆盖)
 	status := result.Status
-	if status == "failed" && len(allowedExits) > 0 && allowedExits[result.ExitCode] {
+	if status == "failed" && result.TerminationReason == "" && len(allowedExits) > 0 && allowedExits[result.ExitCode] {
 		status = "success"
 	}
 

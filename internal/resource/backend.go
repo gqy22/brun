@@ -3,6 +3,7 @@ package resource
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Mode string
@@ -52,4 +53,24 @@ type Scope interface {
 type Backend interface {
 	Name() string
 	Prepare(runID string) (Scope, error)
+}
+
+func WaitEmpty(scope Scope, timeout time.Duration) (bool, error) {
+	if scope == nil {
+		return true, nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		populated, err := scope.Populated()
+		if err != nil {
+			return false, err
+		}
+		if !populated {
+			return true, nil
+		}
+		if timeout <= 0 || time.Now().After(deadline) {
+			return false, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
