@@ -24,8 +24,14 @@ license: MIT/Expat
 accessed: "2026-07-14"
 used_by:
   guides:
+    - bcftools.concat-vs-merge
     - bcftools.pipeline-uncompressed
     - bcftools.parallel-by-contig
+    - bcftools.regions-vs-targets
+    - bcftools.split-multiallelic
   cases:
+    - bcftools.concat-vs-merge
     - bcftools.pipeline-equivalence
     - bcftools.parallel-by-contig
+    - bcftools.regions-vs-targets
+    - bcftools.split-multiallelic

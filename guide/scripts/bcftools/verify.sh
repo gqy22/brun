@@ -60,4 +60,52 @@ bcftools view -H "${WORK}/input.vcf.gz" > "${WORK}/input.records"
 bcftools view -H "${WORK}/concatenated.vcf.gz" > "${WORK}/concatenated.records"
 diff -u "${WORK}/input.records" "${WORK}/concatenated.records"
 
+# 验证 regions 使用记录重叠，而 targets 默认只检查 POS。
+REGION_COUNT="$(bcftools view -H -r '1:3062916-3062916' "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+TARGET_COUNT="$(bcftools view -H -t '1:3062916-3062916' "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+REGION_POS_COUNT="$(bcftools view -H --regions-overlap 0 -r '1:3062916-3062916' "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+[[ "${REGION_COUNT}" == "1" && "${TARGET_COUNT}" == "0" && "${REGION_POS_COUNT}" == "0" ]] || {
+  echo "regions/targets 重叠语义验证失败" >&2
+  exit 1
+}
+
+# 验证 norm -m -any 将每个 ALT 拆为一条记录，并保持样本顺序。
+bcftools norm -m -any -Oz -o "${WORK}/split.vcf.gz" "${WORK}/input.vcf.gz"
+EXPECTED_SPLIT_RECORDS="$(bcftools query -f '%ALT\n' "${WORK}/input.vcf.gz" |
+  awk -F ',' '{count += NF} END {print count+0}')"
+ACTUAL_SPLIT_RECORDS="$(bcftools view -H "${WORK}/split.vcf.gz" | wc -l | tr -d ' ')"
+[[ "${ACTUAL_SPLIT_RECORDS}" == "${EXPECTED_SPLIT_RECORDS}" ]] || {
+  echo "多等位拆分记录数不符: ${ACTUAL_SPLIT_RECORDS} != ${EXPECTED_SPLIT_RECORDS}" >&2
+  exit 1
+}
+if bcftools query -f '%ALT\n' "${WORK}/split.vcf.gz" | grep -q ','; then
+  echo "多等位拆分后仍存在多个 ALT" >&2
+  exit 1
+fi
+diff -u \
+  <(bcftools query --list-samples "${WORK}/input.vcf.gz") \
+  <(bcftools query --list-samples "${WORK}/split.vcf.gz")
+
+# 验证 merge 用于组合不同样本；concat 会拒绝不同的样本列。
+bcftools view -s A -Oz -o "${WORK}/sample-a.vcf.gz" "${WORK}/input.vcf.gz"
+bcftools view -s B -Oz -o "${WORK}/sample-b.vcf.gz" "${WORK}/input.vcf.gz"
+bcftools index "${WORK}/sample-a.vcf.gz"
+bcftools index "${WORK}/sample-b.vcf.gz"
+bcftools merge -Oz -o "${WORK}/merged-samples.vcf.gz" \
+  "${WORK}/sample-a.vcf.gz" "${WORK}/sample-b.vcf.gz"
+printf 'A\nB\n' > "${WORK}/expected.samples"
+bcftools query --list-samples "${WORK}/merged-samples.vcf.gz" > "${WORK}/merged.samples"
+diff -u "${WORK}/expected.samples" "${WORK}/merged.samples"
+MERGED_RECORDS="$(bcftools view -H "${WORK}/merged-samples.vcf.gz" | wc -l | tr -d ' ')"
+INPUT_RECORDS="$(bcftools view -H "${WORK}/input.vcf.gz" | wc -l | tr -d ' ')"
+[[ "${MERGED_RECORDS}" == "${INPUT_RECORDS}" ]] || {
+  echo "merge 前后记录数不符: ${MERGED_RECORDS} != ${INPUT_RECORDS}" >&2
+  exit 1
+}
+if bcftools concat -Oz -o "${WORK}/invalid-concat.vcf.gz" \
+  "${WORK}/sample-a.vcf.gz" "${WORK}/sample-b.vcf.gz" >/dev/null 2>&1; then
+  echo "concat 不应接受不同样本列" >&2
+  exit 1
+fi
+
 printf '验证通过: bcftools %s\n' "$(bcftools --version-only)"

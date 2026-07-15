@@ -1,0 +1,13 @@
+schema: 1
+id: bcftools.concat-vs-merge
+guide: bcftools.concat-vs-merge
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - concat_records_equal
+  - merged_samples_and_record_count_equal

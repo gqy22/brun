@@ -26,8 +26,15 @@ func TestSearchMatchesMetadataAndBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	matches := Search(entries, "bcftools contig")
-	if len(matches) != 1 || matches[0].ID != "bcftools.parallel-by-contig" {
-		t.Fatalf("Search() = %+v, want parallel-by-contig", matches)
+	found := false
+	for _, match := range matches {
+		if match.ID == "bcftools.parallel-by-contig" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Search() = %+v, want results to contain parallel-by-contig", matches)
 	}
 	if matches := Search(entries, "不存在的关键词"); len(matches) != 0 {
 		t.Fatalf("Search() returned unexpected matches: %+v", matches)

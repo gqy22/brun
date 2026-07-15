@@ -1,0 +1,12 @@
+schema: 1
+id: bcftools.regions-vs-targets
+guide: bcftools.regions-vs-targets
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - default_overlap_semantics_match
