@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-const TerminationRecordFile = ".termination.json"
+const TerminationRecordFile = "termination.json"
 
 type TerminationRecord struct {
-	Version   int    `json:"version"`
+	Schema    int    `json:"schema"`
 	Reason    string `json:"reason"`
 	Signal    string `json:"signal"`
 	Escalated bool   `json:"escalated"`
@@ -33,8 +33,8 @@ func WriteTerminationRecord(runDir string, record TerminationRecord) error {
 	if runDir == "" {
 		return nil
 	}
-	if record.Version == 0 {
-		record.Version = 1
+	if record.Schema == 0 {
+		record.Schema = 1
 	}
 	if record.CreatedAt == "" {
 		record.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)

@@ -84,6 +84,42 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 }
 
+func TestStoreStrictRunLifecycle(t *testing.T) {
+	s := newTestStore(t)
+	defer s.Close()
+
+	run := &Run{ID: "lifecycle", CWD: "/tmp", Command: "sleep 1", Status: "starting", StartedAt: ts(), RunDir: "/tmp/lifecycle"}
+	if err := s.CreateRun(run); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkRunRunning(run.ID, 101, 101, 12345); err != nil {
+		t.Fatal(err)
+	}
+	running, err := s.GetRun(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != "running" || running.ProcessPID != 101 || running.ProcessPGID != 101 || running.ProcessStartTicks != 12345 {
+		t.Fatalf("unexpected running identity: %+v", running)
+	}
+
+	changed, err := s.FinalizeRun(run.ID, "cancelled", 130, ts(), 25, "user", "SIGTERM", true)
+	if err != nil || !changed {
+		t.Fatalf("FinalizeRun() = %t, %v", changed, err)
+	}
+	changed, err = s.FinalizeRun(run.ID, "failed", 1, ts(), 30, "late_writer", "", false)
+	if err != nil || changed {
+		t.Fatalf("second FinalizeRun() = %t, %v, want false, nil", changed, err)
+	}
+	final, err := s.GetRun(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != "cancelled" || final.TerminationReason != "user" || final.TerminationSignal != "SIGTERM" || !final.TerminationEscalated {
+		t.Fatalf("terminal state was overwritten or incomplete: %+v", final)
+	}
+}
+
 func TestRun_DisplayStatus(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -143,6 +179,36 @@ func TestOpenStoreReadOnlyAllowsQueriesOnly(t *testing.T) {
 	err = ro.CreateRun(&Run{ID: "ro-2", CWD: "/t", Command: "echo no", Status: "running", StartedAt: ts(), RunDir: "/t"})
 	if err == nil {
 		t.Fatal("CreateRun() on readonly store succeeded, want error")
+	}
+}
+
+func TestOpenStoreReadOnlyUpgradesOlderSchema(t *testing.T) {
+	dbPath := filepath.Join(fastTempDir(t), "readonly-upgrade.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`PRAGMA user_version=7`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := OpenStoreReadOnly(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	var version int
+	if err := ro.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
+	}
+	if err := ro.CreateRun(&Run{ID: "still-readonly", CWD: "/t", Command: "true", Status: "success", StartedAt: ts(), RunDir: "/t"}); err == nil {
+		t.Fatal("upgraded readonly store accepted a write")
 	}
 }
 
@@ -477,7 +543,7 @@ func TestStore_MigrateBackfillsEnvStatus(t *testing.T) {
 	dir := fastTempDir(t)
 	dbPath := filepath.Join(dir, "test.db")
 
-	// 1) 准备一个 v5 状态的老库：schema 升级到当前版本（v7），并模拟两个老 run。
+	// 1) 准备一个 v5 状态的老库：schema 升级到当前版本（v8），并模拟两个老 run。
 	//    r-ok 已经采集到 hostname/username；r-empty 没有值。
 	//    然后把 user_version 拨回 5，模拟"v5 老库"等待升级。
 	s, err := NewStore(dbPath)
@@ -503,7 +569,7 @@ func TestStore_MigrateBackfillsEnvStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2) 重新打开：触发 v5→v7 迁移，UPDATE 回填应该把状态从 NULL 写成 ok / unavailable
+	// 2) 重新打开：触发 v5→v8 迁移，UPDATE 回填应该把状态从 NULL 写成 ok / unavailable
 	s, err = NewStore(dbPath)
 	if err != nil {
 		t.Fatal(err)

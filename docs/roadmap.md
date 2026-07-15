@@ -108,9 +108,9 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：资源采样能力已显式化。`brun run` 会记录 `resource_supported` 和 `resource_status=ok|unavailable|unsupported`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail，避免把“不支持采样”显示成真实 0。
 
-已完成：运行控制入口已统一为 `brun stop <run_id>`。终止采用两阶段：先发 SIGTERM，等待最多 3 秒宽限期，进程仍未退出再发 SIGKILL；支持 `--force` 跳过宽限期，支持 `--latest` 选择器，作用于整个进程组（含子进程）。CLI stop、Web kill 和前台信号处理共享 `StopManagedProcess()`：信号发送前校验 PID、PGID 与 Linux `/proc/<pid>/stat` 启动时钟，PID 被复用时拒绝操作；返回成功前确认整个 PGID 已退出。用户停止写为 `cancelled`，运行超时写为 `timed_out`，失败仍写为 `failed`；信号、升级到 SIGKILL 与进程组确认结果保存在 `.termination.json` 和诊断事件中。
+已完成：运行控制入口已统一为 `brun stop <run_id>`。终止采用两阶段：先发 SIGTERM，等待最多 3 秒宽限期，进程仍未退出再发 SIGKILL；支持 `--force` 跳过宽限期，支持 `--latest` 选择器，作用于整个进程组（含子进程）。CLI stop、Web kill 和前台信号处理共享 `StopManagedProcess()`：信号发送前校验 PID、PGID 与 Linux `/proc/<pid>/stat` 启动时钟，PID 被复用时拒绝操作；返回成功前确认整个 PGID 已退出。用户停止写为 `cancelled`，运行超时写为 `timed_out`，失败仍写为 `failed`；信号、升级到 SIGKILL 与进程组确认结果保存在 `termination.json`、数据库终止字段和诊断事件中。
 
-已完成：`.pid` 从单个整数升级为原子写入的 JSON 进程身份记录，包含版本、PID、PGID、启动时钟和创建时间；读取端继续兼容历史整数 `.pid`。`brun list`、`brun show`、Web 查询和 Web 周期检查共用 reconciler：发现进程身份不一致、进程组消失或超过 2 分钟仍没有有效进程元数据时，将失联的 `running` 修复为 `failed`，同时补齐结束时间、duration、metadata.yaml 和诊断事件。因此 CLI-only 使用不再依赖启动 Web 才能清理 stale running。
+已完成（schema v8）：运行状态采用严格的 `starting → running → 终态` 状态机。子进程启动后将 PID、PGID、启动时钟原子提交到数据库和 `process.json`；不再读取整数 `.pid`，也不接受数据库与文件身份不一致。`brun list`、`brun show`、Web 查询和 Web 周期检查共用 reconciler：`running` 缺少有效身份时立即失败，`starting` 超过 10 分钟仍未进入运行态则回收为失败；终态更新使用条件写入，避免停止、超时和自然退出互相覆盖。
 
 已完成：hostname/username 采集状态已显式化。`brun run` 启动时尝试 `os.Hostname()` 和 `USER` 环境变量：成功写入 `hostname_status=ok`/`username_status=ok`，失败或为空时写入 `unavailable`。字段已并入 SQLite schema（version 6 迁移加 `hostname_status` / `username_status` 两列）、`metadata.yaml`、`brun show --json` / `brun list --json` 输出和 Web detail。`brun repair` 从 `metadata.yaml` 重建索引时也会带回这两个状态。
 

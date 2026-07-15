@@ -296,6 +296,20 @@ func BuildMetadataYAML(run *internal.Run) string {
 	if run.DurationMs > 0 {
 		fmt.Fprintf(&b, "duration_ms: %d\n", run.DurationMs)
 	}
+	if run.ProcessPID > 0 {
+		fmt.Fprintf(&b, "process_pid: %d\n", run.ProcessPID)
+		fmt.Fprintf(&b, "process_pgid: %d\n", run.ProcessPGID)
+		fmt.Fprintf(&b, "process_start_ticks: %d\n", run.ProcessStartTicks)
+	}
+	if run.TerminationReason != "" {
+		fmt.Fprintf(&b, "termination_reason: %s\n", run.TerminationReason)
+	}
+	if run.TerminationSignal != "" {
+		fmt.Fprintf(&b, "termination_signal: %s\n", run.TerminationSignal)
+	}
+	if run.TerminationEscalated {
+		b.WriteString("termination_escalated: true\n")
+	}
 	if run.GitCommit != "" {
 		fmt.Fprintf(&b, "git_commit: %s\n", run.GitCommit)
 	}

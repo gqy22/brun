@@ -372,6 +372,7 @@ body {
 .row-status-success td:first-child::before { background: var(--success); }
 .row-status-failed td:first-child::before { background: var(--danger); }
 .row-status-running td:first-child::before { background: var(--running); }
+.row-status-starting td:first-child::before { background: var(--running); }
 .row-status-success_with_warnings td:first-child::before { background: var(--warning); }
 .row-status-failed_with_warnings td:first-child::before { background: var(--warning); }
 .row-status-cancelled td:first-child::before { background: #94a3b8; }
@@ -424,6 +425,8 @@ body {
 .badge-timed_out_with_warnings::before { background: var(--warning); }
 .badge-running { background: var(--running-bg); color: #0e7490; }
 .badge-running::before { background: var(--running); animation: dotPulse 1.5s infinite; }
+.badge-starting { background: var(--running-bg); color: #0e7490; }
+.badge-starting::before { background: var(--running); animation: dotPulse 1.5s infinite; }
 .badge-danger { background: rgba(239,68,68,0.12); color: #ef4444; }
 .badge-danger::before { background: #ef4444; }
 .badge-warning { background: rgba(245,158,11,0.12); color: #d97706; }

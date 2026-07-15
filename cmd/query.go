@@ -26,29 +26,34 @@ type RunRow struct {
 }
 
 type RunDetail struct {
-	ID                string
-	Name              string
-	Project           string
-	ProjectSource     string
-	Status            string
-	DisplayStatus     string
-	Command           string
-	CWD               string
-	CWDSource         string
-	StartedAt         string
-	EndedAt           string
-	Duration          string
-	ExitCode          int
-	PeakRSSKB         int64
-	CPUTimeMs         int64
-	ResourceSupported bool
-	ResourceStatus    string
-	GitRepo           string
-	GitCommit         string
-	GitDirty          bool
-	Tags              []string
-	Note              string
-	Diag              DiagnosticDetail
+	ID                   string
+	Name                 string
+	Project              string
+	ProjectSource        string
+	Status               string
+	DisplayStatus        string
+	Command              string
+	CWD                  string
+	CWDSource            string
+	StartedAt            string
+	EndedAt              string
+	Duration             string
+	ExitCode             int
+	PeakRSSKB            int64
+	CPUTimeMs            int64
+	ResourceSupported    bool
+	ResourceStatus       string
+	GitRepo              string
+	GitCommit            string
+	GitDirty             bool
+	Tags                 []string
+	Note                 string
+	Diag                 DiagnosticDetail
+	ProcessPID           int
+	ProcessPGID          int
+	TerminationReason    string
+	TerminationSignal    string
+	TerminationEscalated bool
 }
 
 type DiagnosticDetail struct {
@@ -383,6 +388,19 @@ func FormatShow(r *RunDetail) string {
 	if r.Duration != "" {
 		fmt.Fprintf(&b, "%s  %s\n", Bold("Duration:"), r.Duration)
 	}
+	if r.ProcessPID > 0 {
+		fmt.Fprintf(&b, "%s  PID %d / PGID %d\n", Bold("Process:"), r.ProcessPID, r.ProcessPGID)
+	}
+	if r.TerminationReason != "" {
+		fmt.Fprintf(&b, "%s  %s", Bold("Termination:"), r.TerminationReason)
+		if r.TerminationSignal != "" {
+			fmt.Fprintf(&b, " (%s)", r.TerminationSignal)
+		}
+		if r.TerminationEscalated {
+			b.WriteString(" escalated")
+		}
+		b.WriteString("\n")
+	}
 	if r.PeakRSSKB > 0 || r.CPUTimeMs > 0 {
 		if r.PeakRSSKB > 0 {
 			fmt.Fprintf(&b, "%s  %s\n", Bold("Memory:"), fmtMem(r.PeakRSSKB))
@@ -510,7 +528,7 @@ func fmtCPU(ms int64) string {
 }
 
 func DisplayDuration(status, startedAt string, durationMs int64) string {
-	if status == "running" && startedAt != "" {
+	if (status == "running" || status == "starting") && startedAt != "" {
 		if started, err := time.Parse(time.RFC3339, startedAt); err == nil {
 			ms := time.Since(started).Milliseconds()
 			if ms < 0 {

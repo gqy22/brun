@@ -27,6 +27,8 @@ type RunResult struct {
 	TerminationEscalated bool
 }
 
+type RunStartedHook func(ProcessMetadata) error
+
 type RunRecord struct {
 	ID        string
 	Name      string
@@ -156,7 +158,7 @@ func SaveInputScript(runDir, scriptPath string) error {
 }
 
 // ExecuteCommandWithSignal 执行命令并支持信号中断
-func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal) RunResult {
+func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string, timeout time.Duration, sigCh chan os.Signal, onStarted RunStartedHook) RunResult {
 	start := time.Now()
 
 	stdoutF, _ := os.Create(stdoutPath)
@@ -187,6 +189,9 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 	metadata, metadataErr := NewProcessMetadata(cmd.Process.Pid, cmd.Process.Pid)
 	if metadataErr == nil {
 		metadataErr = WriteProcessMetadata(runDir, metadata)
+	}
+	if metadataErr == nil && onStarted != nil {
+		metadataErr = onStarted(metadata)
 	}
 	if metadataErr != nil {
 		_ = KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)

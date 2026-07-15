@@ -35,6 +35,7 @@ func TestExecuteCommandWithSignalTerminatesChildProcessGroup(t *testing.T) {
 		filepath.Join(tmp, "stderr.log"),
 		0,
 		sigCh,
+		nil,
 	)
 	if result.ExitCode != 130 {
 		t.Fatalf("ExitCode = %d, want 130", result.ExitCode)
@@ -46,7 +47,7 @@ func TestExecuteCommandWithSignalTerminatesChildProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read process metadata: %v", err)
 	}
-	if metadata.PID <= 0 || metadata.PGID <= 0 || metadata.StartTimeTicks == 0 || metadata.Legacy {
+	if metadata.PID <= 0 || metadata.PGID <= 0 || metadata.StartTimeTicks == 0 || metadata.Schema != 1 {
 		t.Fatalf("process metadata = %+v", metadata)
 	}
 
@@ -77,6 +78,7 @@ func TestExecuteCommandWithSignalReportsTimeout(t *testing.T) {
 		filepath.Join(tmp, "stderr.log"),
 		100*time.Millisecond,
 		make(chan os.Signal),
+		nil,
 	)
 	if result.Status != "timed_out" || result.ExitCode != 124 || result.TerminationReason != "timeout" {
 		t.Fatalf("result = %+v, want timed_out/124", result)

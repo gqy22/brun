@@ -68,6 +68,8 @@ func StatusColor(status string) string {
 		styledBase = Red(base)
 	case "running":
 		styledBase = Yellow(base)
+	case "starting":
+		styledBase = Cyan(base)
 	case "cancelled":
 		styledBase = Magenta(base)
 	case "timed_out":
@@ -107,7 +109,7 @@ func DiagnosticColor(diagnostic string) string {
 }
 
 func DurationColor(status, duration string) string {
-	if status == "running" {
+	if status == "running" || status == "starting" {
 		return Yellow(duration)
 	}
 	return Dim(duration)

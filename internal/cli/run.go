@@ -194,7 +194,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 		Project:        projName,
 		CWD:            cwd,
 		Command:        commandStr,
-		Status:         "running",
+		Status:         "starting",
 		RunDir:         runDir,
 		StartedAt:      now,
 		Hostname:       host,
@@ -214,6 +214,9 @@ func executeRun(args []string, name, project, note string, tags []string,
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(cmd.BuildMetadataYAML(runRecord)), 0o644); err != nil {
+		diagnostics.Warning("metadata_write_failed", "starting metadata.yaml 写入失败", err.Error())
 	}
 	syncRunDiagnostics(store, runID, runDir)
 	// 立即累加模式：每次写完 diagnostics.jsonl 并 fsync 后，对 SQLite 计数 +1，
@@ -272,7 +275,16 @@ func executeRun(args []string, name, project, note string, tags []string,
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh)
+	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh, func(metadata cmd.ProcessMetadata) error {
+		if err := store.MarkRunRunning(runID, metadata.PID, metadata.PGID, int64(metadata.StartTimeTicks)); err != nil {
+			return err
+		}
+		runRecord.Status = "running"
+		runRecord.ProcessPID = metadata.PID
+		runRecord.ProcessPGID = metadata.PGID
+		runRecord.ProcessStartTicks = int64(metadata.StartTimeTicks)
+		return os.WriteFile(filepath.Join(runDir, "metadata.yaml"), []byte(cmd.BuildMetadataYAML(runRecord)), 0o644)
+	})
 	if result.TerminationReason != "" {
 		detail := fmt.Sprintf("reason=%s signal=%s escalated=%t", result.TerminationReason, result.TerminationSignal, result.TerminationEscalated)
 		switch result.TerminationReason {
@@ -365,6 +377,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	if err := finishRun(store, diagnostics, runRecord, result, status); err != nil {
 		return err
 	}
+	status = runRecord.Status
 
 	// 16. 打印摘要
 	fmt.Printf("\n命令执行完成: %s，耗时 %s\n", status, cmd.DurationString(result.DurationMs))
@@ -394,18 +407,26 @@ func executeRun(args []string, name, project, note string, tags []string,
 }
 
 func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, runRecord *internal.Run, result cmd.RunResult, status string) error {
-	if err := store.UpdateRunStatus(runRecord.ID, status, result.ExitCode,
-		result.EndedAt, result.DurationMs); err != nil {
+	changed, err := store.FinalizeRun(runRecord.ID, status, result.ExitCode,
+		result.EndedAt, result.DurationMs, result.TerminationReason, result.TerminationSignal, result.TerminationEscalated)
+	if err != nil {
 		return fmt.Errorf("更新状态失败: %w", err)
 	}
 	if err := store.UpdateRunResources(runRecord.ID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus); err != nil {
 		diagnostics.Warning("resource_write_failed", "资源数据写入失败", err.Error())
 	}
 
-	runRecord.Status = status
-	runRecord.ExitCode = result.ExitCode
-	runRecord.EndedAt = result.EndedAt
-	runRecord.DurationMs = result.DurationMs
+	if changed {
+		runRecord.Status = status
+		runRecord.ExitCode = result.ExitCode
+		runRecord.EndedAt = result.EndedAt
+		runRecord.DurationMs = result.DurationMs
+		runRecord.TerminationReason = result.TerminationReason
+		runRecord.TerminationSignal = result.TerminationSignal
+		runRecord.TerminationEscalated = result.TerminationEscalated
+	} else if latest, getErr := store.GetRun(runRecord.ID); getErr == nil {
+		*runRecord = *latest
+	}
 	runRecord.PeakRSSKB = result.PeakRSSKB
 	runRecord.CPUTimeMs = result.CPUTimeMs
 	runRecord.ResourceSupported = result.ResourceSupported
@@ -419,6 +440,9 @@ func finishRun(store *internal.Store, diagnostics *internal.DiagnosticWriter, ru
 		// 终态一致性：以 jsonl 真实计数为准再写一次 SQLite，
 		// 覆盖掉期间任何 IncrementRunDiagnostic 漏掉的事件。
 		_ = store.UpdateRunDiagnostics(runRecord.ID, summary)
+	}
+	if latest, getErr := store.GetRun(runRecord.ID); getErr == nil {
+		*runRecord = *latest
 	}
 	metaYAML := cmd.BuildMetadataYAML(runRecord)
 	if err := os.WriteFile(filepath.Join(runRecord.RunDir, "metadata.yaml"), []byte(metaYAML), 0644); err != nil {

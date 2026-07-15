@@ -35,7 +35,7 @@ func listCmd() *cobra.Command {
 				return err
 			}
 			defer store.Close()
-			if _, err := cmd.ReconcileRunningRuns(store, 200); err != nil {
+			if _, err := cmd.ReconcileActiveRuns(store, 200); err != nil {
 				return err
 			}
 
@@ -126,7 +126,7 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return runLookupError(err)
 			}
-			if r.Status == "running" {
+			if r.Status == "running" || r.Status == "starting" {
 				if _, err := cmd.ReconcileRun(store, r); err != nil {
 					return err
 				}
@@ -146,29 +146,34 @@ func showCmd() *cobra.Command {
 			}
 
 			detail := &cmd.RunDetail{
-				ID:                r.ID,
-				Name:              r.Name,
-				Project:           r.Project,
-				Status:            r.Status,
-				DisplayStatus:     r.DisplayStatus(),
-				Command:           r.Command,
-				CWD:               r.CWD,
-				StartedAt:         r.StartedAt,
-				EndedAt:           r.EndedAt,
-				Duration:          cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
-				ExitCode:          r.ExitCode,
-				PeakRSSKB:         r.PeakRSSKB,
-				CPUTimeMs:         r.CPUTimeMs,
-				ResourceSupported: r.ResourceSupported,
-				ResourceStatus:    r.ResourceStatus,
-				GitRepo:           r.GitRepo,
-				GitCommit:         r.GitCommit,
-				GitDirty:          r.GitDirty,
-				Tags:              tags,
-				Note:              note,
-				Diag:              toCmdDiagnosticDetail(internal.DiagnosticSummaryFromRun(r)),
-				CWDSource:         r.CWDSource,
-				ProjectSource:     r.ProjectSource,
+				ID:                   r.ID,
+				Name:                 r.Name,
+				Project:              r.Project,
+				Status:               r.Status,
+				DisplayStatus:        r.DisplayStatus(),
+				Command:              r.Command,
+				CWD:                  r.CWD,
+				StartedAt:            r.StartedAt,
+				EndedAt:              r.EndedAt,
+				Duration:             cmd.DisplayDuration(r.Status, r.StartedAt, r.DurationMs),
+				ExitCode:             r.ExitCode,
+				PeakRSSKB:            r.PeakRSSKB,
+				CPUTimeMs:            r.CPUTimeMs,
+				ResourceSupported:    r.ResourceSupported,
+				ResourceStatus:       r.ResourceStatus,
+				GitRepo:              r.GitRepo,
+				GitCommit:            r.GitCommit,
+				GitDirty:             r.GitDirty,
+				Tags:                 tags,
+				Note:                 note,
+				Diag:                 toCmdDiagnosticDetail(internal.DiagnosticSummaryFromRun(r)),
+				ProcessPID:           r.ProcessPID,
+				ProcessPGID:          r.ProcessPGID,
+				TerminationReason:    r.TerminationReason,
+				TerminationSignal:    r.TerminationSignal,
+				TerminationEscalated: r.TerminationEscalated,
+				CWDSource:            r.CWDSource,
+				ProjectSource:        r.ProjectSource,
 			}
 			fmt.Print(cmd.FormatShow(detail))
 			return nil
@@ -181,76 +186,88 @@ func showCmd() *cobra.Command {
 }
 
 type runJSONPayload struct {
-	ID                string                     `json:"id"`
-	Name              string                     `json:"name,omitempty"`
-	Project           string                     `json:"project"`
-	ProjectSource     string                     `json:"project_source,omitempty"`
-	CWD               string                     `json:"cwd"`
-	CWDSource         string                     `json:"cwd_source,omitempty"`
-	Command           string                     `json:"command"`
-	Status            string                     `json:"status"`
-	DisplayStatus     string                     `json:"display_status,omitempty"`
-	ExitCode          int                        `json:"exit_code"`
-	StartedAt         string                     `json:"started_at"`
-	EndedAt           string                     `json:"ended_at,omitempty"`
-	DurationMs        int64                      `json:"duration_ms"`
-	RunDir            string                     `json:"run_dir"`
-	Hostname          string                     `json:"hostname,omitempty"`
-	HostnameStatus    string                     `json:"hostname_status,omitempty"`
-	Username          string                     `json:"username,omitempty"`
-	UsernameStatus    string                     `json:"username_status,omitempty"`
-	GitRepo           string                     `json:"git_repo,omitempty"`
-	GitBranch         string                     `json:"git_branch,omitempty"`
-	GitCommit         string                     `json:"git_commit,omitempty"`
-	GitDirty          bool                       `json:"git_dirty"`
-	CondaStatus       string                     `json:"conda_status,omitempty"`
-	CondaEnv          string                     `json:"conda_env,omitempty"`
-	CondaPrefix       string                     `json:"conda_prefix,omitempty"`
-	PythonVersion     string                     `json:"python_version,omitempty"`
-	ResourceSupported bool                       `json:"resource_supported"`
-	ResourceStatus    string                     `json:"resource_status,omitempty"`
-	PeakRSSKB         int64                      `json:"peak_rss_kb"`
-	CPUTimeMs         int64                      `json:"cpu_time_ms"`
-	Tags              []string                   `json:"tags,omitempty"`
-	Note              string                     `json:"note,omitempty"`
-	DiagnosticSummary internal.DiagnosticSummary `json:"diagnostic_summary"`
+	ID                   string                     `json:"id"`
+	Name                 string                     `json:"name,omitempty"`
+	Project              string                     `json:"project"`
+	ProjectSource        string                     `json:"project_source,omitempty"`
+	CWD                  string                     `json:"cwd"`
+	CWDSource            string                     `json:"cwd_source,omitempty"`
+	Command              string                     `json:"command"`
+	Status               string                     `json:"status"`
+	DisplayStatus        string                     `json:"display_status,omitempty"`
+	ExitCode             int                        `json:"exit_code"`
+	StartedAt            string                     `json:"started_at"`
+	EndedAt              string                     `json:"ended_at,omitempty"`
+	DurationMs           int64                      `json:"duration_ms"`
+	RunDir               string                     `json:"run_dir"`
+	Hostname             string                     `json:"hostname,omitempty"`
+	HostnameStatus       string                     `json:"hostname_status,omitempty"`
+	Username             string                     `json:"username,omitempty"`
+	UsernameStatus       string                     `json:"username_status,omitempty"`
+	GitRepo              string                     `json:"git_repo,omitempty"`
+	GitBranch            string                     `json:"git_branch,omitempty"`
+	GitCommit            string                     `json:"git_commit,omitempty"`
+	GitDirty             bool                       `json:"git_dirty"`
+	CondaStatus          string                     `json:"conda_status,omitempty"`
+	CondaEnv             string                     `json:"conda_env,omitempty"`
+	CondaPrefix          string                     `json:"conda_prefix,omitempty"`
+	PythonVersion        string                     `json:"python_version,omitempty"`
+	ResourceSupported    bool                       `json:"resource_supported"`
+	ResourceStatus       string                     `json:"resource_status,omitempty"`
+	PeakRSSKB            int64                      `json:"peak_rss_kb"`
+	CPUTimeMs            int64                      `json:"cpu_time_ms"`
+	Tags                 []string                   `json:"tags,omitempty"`
+	Note                 string                     `json:"note,omitempty"`
+	DiagnosticSummary    internal.DiagnosticSummary `json:"diagnostic_summary"`
+	ProcessPID           int                        `json:"process_pid,omitempty"`
+	ProcessPGID          int                        `json:"process_pgid,omitempty"`
+	ProcessStartTicks    int64                      `json:"process_start_ticks,omitempty"`
+	TerminationReason    string                     `json:"termination_reason,omitempty"`
+	TerminationSignal    string                     `json:"termination_signal,omitempty"`
+	TerminationEscalated bool                       `json:"termination_escalated"`
 }
 
 func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
 	return runJSONPayload{
-		ID:                r.ID,
-		Name:              r.Name,
-		Project:           r.Project,
-		ProjectSource:     r.ProjectSource,
-		CWD:               r.CWD,
-		CWDSource:         r.CWDSource,
-		Command:           r.Command,
-		Status:            r.Status,
-		DisplayStatus:     r.DisplayStatus(),
-		ExitCode:          r.ExitCode,
-		StartedAt:         r.StartedAt,
-		EndedAt:           r.EndedAt,
-		DurationMs:        r.DurationMs,
-		RunDir:            r.RunDir,
-		Hostname:          r.Hostname,
-		HostnameStatus:    r.HostnameStatus,
-		Username:          r.Username,
-		UsernameStatus:    r.UsernameStatus,
-		GitRepo:           r.GitRepo,
-		GitBranch:         r.GitBranch,
-		GitCommit:         r.GitCommit,
-		GitDirty:          r.GitDirty,
-		CondaStatus:       r.CondaStatus,
-		CondaEnv:          r.CondaEnv,
-		CondaPrefix:       r.CondaPrefix,
-		PythonVersion:     r.PythonVersion,
-		ResourceSupported: r.ResourceSupported,
-		ResourceStatus:    r.ResourceStatus,
-		PeakRSSKB:         r.PeakRSSKB,
-		CPUTimeMs:         r.CPUTimeMs,
-		Tags:              tags,
-		Note:              note,
-		DiagnosticSummary: internal.DiagnosticSummaryFromRun(r),
+		ID:                   r.ID,
+		Name:                 r.Name,
+		Project:              r.Project,
+		ProjectSource:        r.ProjectSource,
+		CWD:                  r.CWD,
+		CWDSource:            r.CWDSource,
+		Command:              r.Command,
+		Status:               r.Status,
+		DisplayStatus:        r.DisplayStatus(),
+		ExitCode:             r.ExitCode,
+		StartedAt:            r.StartedAt,
+		EndedAt:              r.EndedAt,
+		DurationMs:           r.DurationMs,
+		RunDir:               r.RunDir,
+		Hostname:             r.Hostname,
+		HostnameStatus:       r.HostnameStatus,
+		Username:             r.Username,
+		UsernameStatus:       r.UsernameStatus,
+		GitRepo:              r.GitRepo,
+		GitBranch:            r.GitBranch,
+		GitCommit:            r.GitCommit,
+		GitDirty:             r.GitDirty,
+		CondaStatus:          r.CondaStatus,
+		CondaEnv:             r.CondaEnv,
+		CondaPrefix:          r.CondaPrefix,
+		PythonVersion:        r.PythonVersion,
+		ResourceSupported:    r.ResourceSupported,
+		ResourceStatus:       r.ResourceStatus,
+		PeakRSSKB:            r.PeakRSSKB,
+		CPUTimeMs:            r.CPUTimeMs,
+		Tags:                 tags,
+		Note:                 note,
+		DiagnosticSummary:    internal.DiagnosticSummaryFromRun(r),
+		ProcessPID:           r.ProcessPID,
+		ProcessPGID:          r.ProcessPGID,
+		ProcessStartTicks:    r.ProcessStartTicks,
+		TerminationReason:    r.TerminationReason,
+		TerminationSignal:    r.TerminationSignal,
+		TerminationEscalated: r.TerminationEscalated,
 	}
 }
 
@@ -891,14 +908,14 @@ func parseListStatusFilter(status string) (string, bool, error) {
 	withWarnings := strings.HasSuffix(status, "_with_warnings")
 	base := strings.TrimSuffix(status, "_with_warnings")
 	switch base {
-	case "running", "success", "failed", "cancelled", "timed_out":
-		if withWarnings && base == "running" {
-			return "", false, cliError("invalid_status", "running 没有 with_warnings 变体", "使用 --status running", nil)
+	case "starting", "running", "success", "failed", "cancelled", "timed_out":
+		if withWarnings && (base == "starting" || base == "running") {
+			return "", false, cliError("invalid_status", base+" 没有 with_warnings 变体", "使用 --status "+base, nil)
 		}
 		return base, withWarnings, nil
 	default:
 		return "", false, cliError("invalid_status", "未知状态: "+status,
-			"支持 running、success、failed、cancelled、timed_out 及对应的 with_warnings 变体", nil)
+			"支持 starting、running、success、failed、cancelled、timed_out 及终态的 with_warnings 变体", nil)
 	}
 }
 

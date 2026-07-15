@@ -75,6 +75,7 @@
       </select>
       <select x-model="filters.status" @change="loadRuns()">
         <option value="">所有状态</option>
+        <option value="starting">启动中</option>
         <option value="running">运行中</option>
         <option value="success">成功</option>
         <option value="success_with_warnings">成功（带警告）</option>
@@ -296,7 +297,7 @@
         manageRunningTimers() {
           var seen = {};
           this.runs.forEach(function(r) {
-            if (r.status === 'running' && r.started_at) seen[r.id] = r.started_at;
+            if ((r.status === 'running' || r.status === 'starting') && r.started_at) seen[r.id] = r.started_at;
           });
           var self = this;
           Object.keys(seen).forEach(function(id) {
@@ -316,7 +317,7 @@
 
 	        getDuration(r) {
 	          var started = this._runningTimers[r.id];
-	          if (started && r.status === 'running') {
+	          if (started && (r.status === 'running' || r.status === 'starting')) {
             var ms = Date.now() - new Date(started).getTime();
             return formatDuration(ms);
           }
@@ -343,7 +344,7 @@
             if (!Array.isArray(runs)) return;
             var total = runs.length;
             var success = runs.filter(function(r) { return r.status === 'success'; }).length;
-            var running = runs.filter(function(r) { return r.status === 'running'; }).length;
+            var running = runs.filter(function(r) { return r.status === 'running' || r.status === 'starting'; }).length;
             var failed = runs.filter(function(r) { return r.status === 'failed'; }).length;
             var today = new Date().toISOString().slice(0, 10);
             this.stats = {

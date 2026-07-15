@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -38,10 +39,25 @@ func newTestServer(t *testing.T) (*testSrv, string) {
 	}
 	runDir := t.TempDir()
 	runID := "test-run-001"
+	pgid, err := syscall.Getpgid(os.Getpid())
+	if err != nil {
+		t.Fatalf("读取测试进程组失败: %v", err)
+	}
+	processMetadata, err := NewProcessMetadata(os.Getpid(), pgid)
+	if err != nil {
+		t.Fatalf("创建测试进程身份失败: %v", err)
+	}
+	if err := WriteProcessMetadata(runDir, processMetadata); err != nil {
+		t.Fatalf("写入测试进程身份失败: %v", err)
+	}
 	run := &internal.Run{
-		ID:     runID,
-		Status: "running",
-		RunDir: runDir,
+		ID:                runID,
+		Status:            "running",
+		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		RunDir:            runDir,
+		ProcessPID:        processMetadata.PID,
+		ProcessPGID:       processMetadata.PGID,
+		ProcessStartTicks: int64(processMetadata.StartTimeTicks),
 	}
 	if err := store.CreateRun(run); err != nil {
 		t.Fatalf("创建测试 run 失败: %v", err)
@@ -699,8 +715,8 @@ func TestSSEStreamLogs_FinishedRun_SendsCompleteAndCloses(t *testing.T) {
 func TestHealthCheckMarksZombieRunWithEndedAtAndDuration(t *testing.T) {
 	srv, runID := newTestServer(t)
 	runDir := srv.getTestRunDir(t, runID)
-	if err := os.WriteFile(filepath.Join(runDir, ".pid"), []byte("999999\n"), 0644); err != nil {
-		t.Fatalf("写入 pid 失败: %v", err)
+	if err := WriteProcessMetadata(runDir, ProcessMetadata{Schema: 1, PID: 999999, PGID: 999999, StartTimeTicks: 1}); err != nil {
+		t.Fatalf("写入 process metadata 失败: %v", err)
 	}
 
 	srv.checkRunningTasks()
@@ -723,8 +739,16 @@ func TestHealthCheckMarksZombieRunWithEndedAtAndDuration(t *testing.T) {
 func TestApiGetProcesses_ReturnsSummary(t *testing.T) {
 	srv, runID := newTestServer(t)
 	runDir := srv.getTestRunDir(t, runID)
-	if err := os.WriteFile(filepath.Join(runDir, ".pid"), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0644); err != nil {
-		t.Fatalf("写入 pid 失败: %v", err)
+	pgid, err := syscall.Getpgid(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := NewProcessMetadata(os.Getpid(), pgid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProcessMetadata(runDir, metadata); err != nil {
+		t.Fatalf("写入 process metadata 失败: %v", err)
 	}
 
 	w := srv.doReq("GET", "/api/runs/"+runID+"/processes")

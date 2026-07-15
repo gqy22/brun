@@ -631,8 +631,3 @@ func waitProcessGroupExit(pgid int, timeout time.Duration) bool {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
-
-// StopRun is retained for legacy integer-only callers.
-func StopRun(pid int, graceSeconds int, force bool) StopResult {
-	return StopManagedProcess("", ProcessMetadata{PID: pid, PGID: pid, Legacy: true}, graceSeconds, force, "user")
-}

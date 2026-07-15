@@ -128,7 +128,7 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	if _, err := ReconcileRunningRuns(s.store, 200); err != nil {
+	if _, err := ReconcileActiveRuns(s.store, 200); err != nil {
 		internal.Log().Warn("api_reconcile_failed", "error", err.Error())
 	}
 
@@ -191,7 +191,7 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err.Error(), 404)
 		return
 	}
-	if run.Status == "running" {
+	if run.Status == "running" || run.Status == "starting" {
 		if _, reconcileErr := ReconcileRun(s.store, run); reconcileErr != nil {
 			internal.Log().Warn("api_reconcile_failed", "run_id", run.ID, "error", reconcileErr.Error())
 		} else if refreshed, getErr := s.store.GetRun(id); getErr == nil {
@@ -217,44 +217,50 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]any{
-		"id":                 run.ID,
-		"name":               run.Name,
-		"project":            run.Project,
-		"project_source":     run.ProjectSource,
-		"cwd":                run.CWD,
-		"cwd_source":         run.CWDSource,
-		"command":            run.Command,
-		"script":             script.Content,
-		"script_name":        script.Name,
-		"status":             run.Status,
-		"display_status":     run.DisplayStatus(),
-		"exit_code":          run.ExitCode,
-		"started_at":         run.StartedAt,
-		"ended_at":           run.EndedAt,
-		"duration_ms":        run.DurationMs,
-		"duration":           DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
-		"hostname":           run.Hostname,
-		"hostname_status":    run.HostnameStatus,
-		"username":           run.Username,
-		"username_status":    run.UsernameStatus,
-		"git_repo":           run.GitRepo,
-		"git_branch":         run.GitBranch,
-		"git_commit":         run.GitCommit,
-		"git_dirty":          run.GitDirty,
-		"conda_status":       run.CondaStatus,
-		"conda_env":          run.CondaEnv,
-		"conda_prefix":       run.CondaPrefix,
-		"python_version":     run.PythonVersion,
-		"resource_supported": run.ResourceSupported,
-		"resource_status":    run.ResourceStatus,
-		"peak_rss_kb":        run.PeakRSSKB,
-		"cpu_time_ms":        run.CPUTimeMs,
-		"run_dir":            run.RunDir,
-		"tags":               tags,
-		"note":               note,
-		"diagnostics":        diagnostics,
-		"diagnostic_summary": diagnosticSummary,
-		"process_summary":    processSummary,
+		"id":                    run.ID,
+		"name":                  run.Name,
+		"project":               run.Project,
+		"project_source":        run.ProjectSource,
+		"cwd":                   run.CWD,
+		"cwd_source":            run.CWDSource,
+		"command":               run.Command,
+		"script":                script.Content,
+		"script_name":           script.Name,
+		"status":                run.Status,
+		"display_status":        run.DisplayStatus(),
+		"exit_code":             run.ExitCode,
+		"started_at":            run.StartedAt,
+		"ended_at":              run.EndedAt,
+		"duration_ms":           run.DurationMs,
+		"duration":              DisplayDuration(run.Status, run.StartedAt, run.DurationMs),
+		"hostname":              run.Hostname,
+		"hostname_status":       run.HostnameStatus,
+		"username":              run.Username,
+		"username_status":       run.UsernameStatus,
+		"git_repo":              run.GitRepo,
+		"git_branch":            run.GitBranch,
+		"git_commit":            run.GitCommit,
+		"git_dirty":             run.GitDirty,
+		"conda_status":          run.CondaStatus,
+		"conda_env":             run.CondaEnv,
+		"conda_prefix":          run.CondaPrefix,
+		"python_version":        run.PythonVersion,
+		"resource_supported":    run.ResourceSupported,
+		"resource_status":       run.ResourceStatus,
+		"peak_rss_kb":           run.PeakRSSKB,
+		"cpu_time_ms":           run.CPUTimeMs,
+		"process_pid":           run.ProcessPID,
+		"process_pgid":          run.ProcessPGID,
+		"process_start_ticks":   run.ProcessStartTicks,
+		"termination_reason":    run.TerminationReason,
+		"termination_signal":    run.TerminationSignal,
+		"termination_escalated": run.TerminationEscalated,
+		"run_dir":               run.RunDir,
+		"tags":                  tags,
+		"note":                  note,
+		"diagnostics":           diagnostics,
+		"diagnostic_summary":    diagnosticSummary,
+		"process_summary":       processSummary,
 	})
 }
 
@@ -492,7 +498,7 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 		Project:   run.Project,
 		CWD:       run.CWD,
 		Command:   run.Command,
-		Status:    "running",
+		Status:    "starting",
 		RunDir:    newDir,
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -506,9 +512,15 @@ func (s *WebServer) apiRerun(w http.ResponseWriter, r *http.Request) {
 	// 后台执行完整流程
 	go func() {
 		sigCh := make(chan os.Signal, 1)
-		result := ExecuteCommandWithSignal(ShellCommandArgs(run.Command), run.CWD, stdoutPath, stderrPath, 0, sigCh)
-		s.store.UpdateRunStatus(newID, result.Status, result.ExitCode, result.EndedAt, result.DurationMs)
+		result := ExecuteCommandWithSignal(ShellCommandArgs(run.Command), run.CWD, stdoutPath, stderrPath, 0, sigCh, func(metadata ProcessMetadata) error {
+			return s.store.MarkRunRunning(newID, metadata.PID, metadata.PGID, int64(metadata.StartTimeTicks))
+		})
+		s.store.FinalizeRun(newID, result.Status, result.ExitCode, result.EndedAt, result.DurationMs,
+			result.TerminationReason, result.TerminationSignal, result.TerminationEscalated)
 		s.store.UpdateRunResources(newID, result.PeakRSSKB, result.CPUTimeMs, result.ResourceSupported, result.ResourceStatus)
+		if finalRun, err := s.store.GetRun(newID); err == nil {
+			_ = writeRunMetadata(finalRun)
+		}
 	}()
 
 	jsonResponse(w, map[string]any{"ok": true, "run_id": newID})
@@ -520,6 +532,14 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 	run, err := s.store.GetRun(id)
 	if err != nil {
 		httpError(w, err.Error(), 404)
+		return
+	}
+	if run.Status == "starting" {
+		if err := FinalizeRunState(s.store, run, "cancelled", 130, "user", "", false); err != nil {
+			httpError(w, err.Error(), 500)
+			return
+		}
+		jsonResponse(w, map[string]any{"ok": true, "run_id": run.ID, "msg": "已取消启动中的任务"})
 		return
 	}
 	if run.Status != "running" {
@@ -539,6 +559,10 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 	metadata, err := ReadProcessMetadata(run.RunDir)
 	if err != nil {
 		httpError(w, "找不到进程信息（可能已结束）", 404)
+		return
+	}
+	if err := ValidateStoredProcessIdentity(run.ProcessPID, run.ProcessPGID, run.ProcessStartTicks, metadata); err != nil {
+		httpError(w, "进程身份记录不一致: "+err.Error(), 409)
 		return
 	}
 
@@ -575,7 +599,7 @@ func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err.Error(), 404)
 		return
 	}
-	if run.Status == "running" {
+	if run.Status == "running" || run.Status == "starting" {
 		httpError(w, "请先终止运行中的任务再删除", 400)
 		return
 	}
@@ -819,7 +843,7 @@ func (s *WebServer) healthCheckLoop(interval time.Duration) {
 }
 
 func (s *WebServer) checkRunningTasks() {
-	results, err := ReconcileRunningRuns(s.store, 200)
+	results, err := ReconcileActiveRuns(s.store, 200)
 	if err != nil {
 		internal.Log().Error("health_check_query_failed", "error", err.Error())
 		return

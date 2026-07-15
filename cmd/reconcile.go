@@ -2,14 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/biotools/brun/internal"
 )
 
-const processMetadataStartupGrace = 2 * time.Minute
+const startingReconcileTimeout = 10 * time.Minute
 
 type ReconcileResult struct {
 	RunID   string
@@ -17,18 +16,20 @@ type ReconcileResult struct {
 	Reason  string
 }
 
-func ReconcileRunningRuns(store *internal.Store, limit int) ([]ReconcileResult, error) {
-	runs, err := store.ListRuns(limit, "", "running", "", "", "", "", false, "", "")
-	if err != nil {
-		return nil, err
-	}
-	results := make([]ReconcileResult, 0, len(runs))
-	for _, run := range runs {
-		result, err := ReconcileRun(store, run)
+func ReconcileActiveRuns(store *internal.Store, limit int) ([]ReconcileResult, error) {
+	results := make([]ReconcileResult, 0)
+	for _, status := range []string{"starting", "running"} {
+		runs, err := store.ListRuns(limit, "", status, "", "", "", "", false, "", "")
 		if err != nil {
 			return results, err
 		}
-		results = append(results, result)
+		for _, run := range runs {
+			result, err := ReconcileRun(store, run)
+			if err != nil {
+				return results, err
+			}
+			results = append(results, result)
+		}
 	}
 	return results, nil
 }
@@ -38,15 +39,25 @@ func ReconcileRun(store *internal.Store, run *internal.Run) (ReconcileResult, er
 		return ReconcileResult{}, nil
 	}
 	result := ReconcileResult{RunID: run.ID}
+	if run.Status == "starting" {
+		if runAge(run) < startingReconcileTimeout {
+			return result, nil
+		}
+		result.Reason = "starting_timeout"
+		result.Changed = true
+		return result, markReconciledFailed(store, run, result.Reason, "run did not enter running within 10 minutes")
+	}
 	if run.Status != "running" {
 		return result, nil
 	}
 	metadata, err := ReadProcessMetadata(run.RunDir)
 	if err != nil {
-		if runAge(run) < processMetadataStartupGrace && os.IsNotExist(err) {
-			return result, nil
-		}
 		result.Reason = "process_metadata_unavailable"
+		result.Changed = true
+		return result, markReconciledFailed(store, run, result.Reason, err.Error())
+	}
+	if err := ValidateStoredProcessIdentity(run.ProcessPID, run.ProcessPGID, run.ProcessStartTicks, metadata); err != nil {
+		result.Reason = "process_metadata_mismatch"
 		result.Changed = true
 		return result, markReconciledFailed(store, run, result.Reason, err.Error())
 	}
@@ -65,7 +76,7 @@ func ReconcileRun(store *internal.Store, run *internal.Run) (ReconcileResult, er
 	return result, markReconciledFailed(store, run, result.Reason, fmt.Sprintf("pgid=%d", metadata.PGID))
 }
 
-func FinalizeRunState(store *internal.Store, run *internal.Run, status string, exitCode int) error {
+func FinalizeRunState(store *internal.Store, run *internal.Run, status string, exitCode int, reason, signal string, escalated bool) error {
 	endedAt := time.Now().UTC()
 	duration := run.DurationMs
 	if started, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
@@ -74,13 +85,16 @@ func FinalizeRunState(store *internal.Store, run *internal.Run, status string, e
 			duration = 0
 		}
 	}
-	if err := store.UpdateRunStatus(run.ID, status, exitCode, endedAt.Format(time.RFC3339), duration); err != nil {
+	changed, err := store.FinalizeRun(run.ID, status, exitCode, endedAt.Format(time.RFC3339), duration, reason, signal, escalated)
+	if err != nil {
 		return err
 	}
-	run.Status = status
-	run.ExitCode = exitCode
-	run.EndedAt = endedAt.Format(time.RFC3339)
-	run.DurationMs = duration
+	if changed {
+		run.Status = status
+		run.ExitCode = exitCode
+		run.EndedAt = endedAt.Format(time.RFC3339)
+		run.DurationMs = duration
+	}
 	latest, err := store.GetRun(run.ID)
 	if err != nil {
 		return err
@@ -109,7 +123,7 @@ func CompleteUserStop(store *internal.Store, run *internal.Run, result StopResul
 		return err
 	}
 	if latest.Status != "cancelled" {
-		return FinalizeRunState(store, latest, "cancelled", 130)
+		return FinalizeRunState(store, latest, "cancelled", 130, "user", result.Signal, result.Escalated)
 	}
 	refreshed, err := store.GetRun(run.ID)
 	if err != nil {
@@ -124,11 +138,11 @@ func writeRunMetadata(run *internal.Run) error {
 
 func markReconciledFailed(store *internal.Store, run *internal.Run, reason, detail string) error {
 	writer := internal.NewDiagnosticWriter(run.RunDir)
-	writer.Warning("run_reconciled_failed", "检测到失联的 running 任务", reason+": "+detail)
+	writer.Warning("run_reconciled_failed", "检测到失联的活动任务", reason+": "+detail)
 	if err := store.IncrementRunDiagnostic(run.ID, "warning", "run_reconciled_failed", time.Now().UTC().Format(time.RFC3339)); err != nil {
 		internal.Log().Warn("reconcile_diagnostic_update_failed", "run_id", run.ID, "error", err.Error())
 	}
-	return FinalizeRunState(store, run, "failed", -1)
+	return FinalizeRunState(store, run, "failed", -1, "reconciler", "", false)
 }
 
 func runAge(run *internal.Run) time.Duration {

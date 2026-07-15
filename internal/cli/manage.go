@@ -140,6 +140,13 @@ func stopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if run.Status == "starting" {
+				if err := cmd.FinalizeRunState(store, run, "cancelled", 130, "user", "", false); err != nil {
+					return err
+				}
+				fmt.Printf("已取消启动中的任务 %s\n", run.ID)
+				return nil
+			}
 			if run.Status != "running" {
 				return cliError("stop_not_running",
 					fmt.Sprintf("任务 %s 当前状态为 %s，无法终止", run.ID, run.Status),
@@ -150,12 +157,15 @@ func stopCmd() *cobra.Command {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return cliError("stop_no_pidfile",
-						fmt.Sprintf("找不到 %s 的进程信息（PID 文件不存在）", run.ID),
+						fmt.Sprintf("找不到 %s 的进程信息（process.json 不存在）", run.ID),
 						"任务可能已经自行结束；使用 brun show "+run.ID+" 确认当前状态", nil)
 				}
 				return cliError("stop_read_pidfile",
-					fmt.Sprintf("读取 PID 文件失败: %v", err),
+					fmt.Sprintf("读取 process.json 失败: %v", err),
 					"检查 run 目录权限: "+run.RunDir, err)
+			}
+			if err := cmd.ValidateStoredProcessIdentity(run.ProcessPID, run.ProcessPGID, run.ProcessStartTicks, metadata); err != nil {
+				return cliError("stop_process_identity", "进程身份记录不一致: "+err.Error(), "运行 brun show "+run.ID+" 检查任务状态", err)
 			}
 
 			// 记录最终资源数据
@@ -280,7 +290,7 @@ func cleanCmd() *cobra.Command {
 
 			items := make([]cmd.CleanItem, 0)
 			for _, r := range runs {
-				if r.Status == "running" {
+				if r.Status == "running" || r.Status == "starting" {
 					continue
 				}
 				if keepFailed && r.Status == "failed" {
@@ -407,37 +417,43 @@ func loadRunsFromMetadata(root string) ([]*internal.Run, error) {
 }
 
 type runMetadata struct {
-	ID                string `yaml:"id"`
-	Name              string `yaml:"name"`
-	Project           string `yaml:"project"`
-	Command           string `yaml:"command"`
-	Status            string `yaml:"status"`
-	ExitCode          int    `yaml:"exit_code"`
-	CWD               string `yaml:"cwd"`
-	StartedAt         string `yaml:"started_at"`
-	EndedAt           string `yaml:"ended_at"`
-	DurationMs        int64  `yaml:"duration_ms"`
-	GitCommit         string `yaml:"git_commit"`
-	GitDirty          bool   `yaml:"git_dirty"`
-	Hostname          string `yaml:"hostname"`
-	HostnameStatus    string `yaml:"hostname_status"`
-	Username          string `yaml:"username"`
-	UsernameStatus    string `yaml:"username_status"`
-	CondaStatus       string `yaml:"conda_status"`
-	CondaEnv          string `yaml:"conda_env"`
-	CondaPrefix       string `yaml:"conda_prefix"`
-	PythonVersion     string `yaml:"python_version"`
-	ResourceSupported bool   `yaml:"resource_supported"`
-	ResourceStatus    string `yaml:"resource_status"`
-	PeakRSSKB         int64  `yaml:"peak_rss_kb"`
-	CPUTimeMs         int64  `yaml:"cpu_time_ms"`
-	CWDSource         string `yaml:"cwd_source"`
-	ProjectSource     string `yaml:"project_source"`
-	DiagInfoCount     int    `yaml:"diag_info_count"`
-	DiagWarningCount  int    `yaml:"diag_warning_count"`
-	DiagErrorCount    int    `yaml:"diag_error_count"`
-	DiagLastCode      string `yaml:"diag_last_code"`
-	DiagLastAt        string `yaml:"diag_last_at"`
+	ID                   string `yaml:"id"`
+	Name                 string `yaml:"name"`
+	Project              string `yaml:"project"`
+	Command              string `yaml:"command"`
+	Status               string `yaml:"status"`
+	ExitCode             int    `yaml:"exit_code"`
+	CWD                  string `yaml:"cwd"`
+	StartedAt            string `yaml:"started_at"`
+	EndedAt              string `yaml:"ended_at"`
+	DurationMs           int64  `yaml:"duration_ms"`
+	GitCommit            string `yaml:"git_commit"`
+	GitDirty             bool   `yaml:"git_dirty"`
+	Hostname             string `yaml:"hostname"`
+	HostnameStatus       string `yaml:"hostname_status"`
+	Username             string `yaml:"username"`
+	UsernameStatus       string `yaml:"username_status"`
+	CondaStatus          string `yaml:"conda_status"`
+	CondaEnv             string `yaml:"conda_env"`
+	CondaPrefix          string `yaml:"conda_prefix"`
+	PythonVersion        string `yaml:"python_version"`
+	ResourceSupported    bool   `yaml:"resource_supported"`
+	ResourceStatus       string `yaml:"resource_status"`
+	PeakRSSKB            int64  `yaml:"peak_rss_kb"`
+	CPUTimeMs            int64  `yaml:"cpu_time_ms"`
+	CWDSource            string `yaml:"cwd_source"`
+	ProjectSource        string `yaml:"project_source"`
+	DiagInfoCount        int    `yaml:"diag_info_count"`
+	DiagWarningCount     int    `yaml:"diag_warning_count"`
+	DiagErrorCount       int    `yaml:"diag_error_count"`
+	DiagLastCode         string `yaml:"diag_last_code"`
+	DiagLastAt           string `yaml:"diag_last_at"`
+	ProcessPID           int    `yaml:"process_pid"`
+	ProcessPGID          int    `yaml:"process_pgid"`
+	ProcessStartTicks    int64  `yaml:"process_start_ticks"`
+	TerminationReason    string `yaml:"termination_reason"`
+	TerminationSignal    string `yaml:"termination_signal"`
+	TerminationEscalated bool   `yaml:"termination_escalated"`
 }
 
 func readRunMetadata(path string) (*internal.Run, error) {
@@ -453,37 +469,43 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		return nil, fmt.Errorf("missing id")
 	}
 	return &internal.Run{
-		ID:                meta.ID,
-		Name:              meta.Name,
-		Project:           meta.Project,
-		Command:           meta.Command,
-		Status:            meta.Status,
-		ExitCode:          meta.ExitCode,
-		CWD:               meta.CWD,
-		StartedAt:         meta.StartedAt,
-		EndedAt:           meta.EndedAt,
-		DurationMs:        meta.DurationMs,
-		GitCommit:         meta.GitCommit,
-		GitDirty:          meta.GitDirty,
-		Hostname:          meta.Hostname,
-		HostnameStatus:    meta.HostnameStatus,
-		Username:          meta.Username,
-		UsernameStatus:    meta.UsernameStatus,
-		CondaStatus:       meta.CondaStatus,
-		CondaEnv:          meta.CondaEnv,
-		CondaPrefix:       meta.CondaPrefix,
-		PythonVersion:     meta.PythonVersion,
-		ResourceSupported: meta.ResourceSupported,
-		ResourceStatus:    meta.ResourceStatus,
-		PeakRSSKB:         meta.PeakRSSKB,
-		CPUTimeMs:         meta.CPUTimeMs,
-		CWDSource:         meta.CWDSource,
-		ProjectSource:     meta.ProjectSource,
-		DiagInfoCount:     meta.DiagInfoCount,
-		DiagWarningCount:  meta.DiagWarningCount,
-		DiagErrorCount:    meta.DiagErrorCount,
-		DiagLastCode:      meta.DiagLastCode,
-		DiagLastAt:        meta.DiagLastAt,
+		ID:                   meta.ID,
+		Name:                 meta.Name,
+		Project:              meta.Project,
+		Command:              meta.Command,
+		Status:               meta.Status,
+		ExitCode:             meta.ExitCode,
+		CWD:                  meta.CWD,
+		StartedAt:            meta.StartedAt,
+		EndedAt:              meta.EndedAt,
+		DurationMs:           meta.DurationMs,
+		GitCommit:            meta.GitCommit,
+		GitDirty:             meta.GitDirty,
+		Hostname:             meta.Hostname,
+		HostnameStatus:       meta.HostnameStatus,
+		Username:             meta.Username,
+		UsernameStatus:       meta.UsernameStatus,
+		CondaStatus:          meta.CondaStatus,
+		CondaEnv:             meta.CondaEnv,
+		CondaPrefix:          meta.CondaPrefix,
+		PythonVersion:        meta.PythonVersion,
+		ResourceSupported:    meta.ResourceSupported,
+		ResourceStatus:       meta.ResourceStatus,
+		PeakRSSKB:            meta.PeakRSSKB,
+		CPUTimeMs:            meta.CPUTimeMs,
+		CWDSource:            meta.CWDSource,
+		ProjectSource:        meta.ProjectSource,
+		DiagInfoCount:        meta.DiagInfoCount,
+		DiagWarningCount:     meta.DiagWarningCount,
+		DiagErrorCount:       meta.DiagErrorCount,
+		DiagLastCode:         meta.DiagLastCode,
+		DiagLastAt:           meta.DiagLastAt,
+		ProcessPID:           meta.ProcessPID,
+		ProcessPGID:          meta.ProcessPGID,
+		ProcessStartTicks:    meta.ProcessStartTicks,
+		TerminationReason:    meta.TerminationReason,
+		TerminationSignal:    meta.TerminationSignal,
+		TerminationEscalated: meta.TerminationEscalated,
 	}, nil
 }
 

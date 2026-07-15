@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestProcessMetadataRoundTripAndLegacyCompatibility(t *testing.T) {
+func TestProcessMetadataRoundTripAndRejectsLegacyPID(t *testing.T) {
 	dir := t.TempDir()
 	want := ProcessMetadata{
-		Version:        1,
+		Schema:         1,
 		PID:            123,
 		PGID:           120,
 		StartTimeTicks: 456,
@@ -29,11 +29,7 @@ func TestProcessMetadataRoundTripAndLegacyCompatibility(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ProcessMetadataFile), []byte("789\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := ReadProcessMetadata(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if legacy.PID != 789 || legacy.PGID != 789 || !legacy.Legacy {
-		t.Fatalf("legacy metadata = %+v", legacy)
+	if _, err := ReadProcessMetadata(dir); err == nil {
+		t.Fatal("integer-only process metadata should be rejected")
 	}
 }

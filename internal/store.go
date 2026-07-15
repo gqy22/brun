@@ -12,7 +12,7 @@ import (
 )
 
 const maxRetries = 5
-const schemaVersion = 7
+const schemaVersion = 8
 const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
@@ -22,40 +22,46 @@ type Store struct {
 }
 
 type Run struct {
-	ID                string
-	Name              string
-	Project           string
-	CWD               string
-	Command           string
-	Status            string
-	ExitCode          int
-	StartedAt         string
-	EndedAt           string
-	DurationMs        int64
-	RunDir            string
-	Hostname          string
-	HostnameStatus    string
-	Username          string
-	UsernameStatus    string
-	GitRepo           string
-	GitBranch         string
-	GitCommit         string
-	GitDirty          bool
-	CondaStatus       string
-	CondaEnv          string
-	CondaPrefix       string
-	PythonVersion     string
-	PeakRSSKB         int64
-	CPUTimeMs         int64
-	ResourceSupported bool
-	ResourceStatus    string
-	DiagInfoCount     int
-	DiagWarningCount  int
-	DiagErrorCount    int
-	DiagLastCode      string
-	DiagLastAt        string
-	CWDSource         string
-	ProjectSource     string
+	ID                   string
+	Name                 string
+	Project              string
+	CWD                  string
+	Command              string
+	Status               string
+	ExitCode             int
+	StartedAt            string
+	EndedAt              string
+	DurationMs           int64
+	RunDir               string
+	Hostname             string
+	HostnameStatus       string
+	Username             string
+	UsernameStatus       string
+	GitRepo              string
+	GitBranch            string
+	GitCommit            string
+	GitDirty             bool
+	CondaStatus          string
+	CondaEnv             string
+	CondaPrefix          string
+	PythonVersion        string
+	PeakRSSKB            int64
+	CPUTimeMs            int64
+	ResourceSupported    bool
+	ResourceStatus       string
+	DiagInfoCount        int
+	DiagWarningCount     int
+	DiagErrorCount       int
+	DiagLastCode         string
+	DiagLastAt           string
+	CWDSource            string
+	ProjectSource        string
+	ProcessPID           int
+	ProcessPGID          int
+	ProcessStartTicks    int64
+	TerminationReason    string
+	TerminationSignal    string
+	TerminationEscalated bool
 }
 
 type Artifact struct {
@@ -90,6 +96,29 @@ func NewStore(path string) (*Store, error) {
 }
 
 func OpenStoreReadOnly(path string) (*Store, error) {
+	// A newly installed binary may query an older database before any write
+	// command is run. Perform the one-time schema upgrade first, then reopen the
+	// connection in strict query-only mode.
+	versionDB, err := sql.Open("sqlite", sqliteDSN(path, true))
+	if err != nil {
+		return nil, err
+	}
+	var version int
+	versionErr := versionDB.QueryRow(`PRAGMA user_version`).Scan(&version)
+	_ = versionDB.Close()
+	if versionErr != nil {
+		return nil, versionErr
+	}
+	if version < schemaVersion {
+		writable, migrateErr := NewStore(path)
+		if migrateErr != nil {
+			return nil, fmt.Errorf("upgrade database schema from v%d to v%d: %w", version, schemaVersion, migrateErr)
+		}
+		if closeErr := writable.Close(); closeErr != nil {
+			return nil, closeErr
+		}
+	}
+
 	db, err := sql.Open("sqlite", sqliteDSN(path, true))
 	if err != nil {
 		return nil, err
@@ -192,6 +221,12 @@ func (s *Store) migrate() error {
 			diag_last_at TEXT,
 			cwd_source TEXT,
 			project_source TEXT,
+			process_pid INTEGER,
+			process_pgid INTEGER,
+			process_start_ticks INTEGER,
+			termination_reason TEXT,
+			termination_signal TEXT,
+			termination_escalated INTEGER DEFAULT 0,
 			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);`,
@@ -238,6 +273,12 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN resource_status TEXT`,
 		`ALTER TABLE runs ADD COLUMN hostname_status TEXT`,
 		`ALTER TABLE runs ADD COLUMN username_status TEXT`,
+		`ALTER TABLE runs ADD COLUMN process_pid INTEGER`,
+		`ALTER TABLE runs ADD COLUMN process_pgid INTEGER`,
+		`ALTER TABLE runs ADD COLUMN process_start_ticks INTEGER`,
+		`ALTER TABLE runs ADD COLUMN termination_reason TEXT`,
+		`ALTER TABLE runs ADD COLUMN termination_signal TEXT`,
+		`ALTER TABLE runs ADD COLUMN termination_escalated INTEGER DEFAULT 0`,
 		// 迁移回填：老 run 已有 hostname/username 文本，但 *_status 还是 NULL。
 		// 已有值说明采集成功，新状态记 ok；空字符串 / NULL 说明采集失败，
 		// 新状态记 unavailable。这两步是幂等的，重复执行也是 no-op。
@@ -362,31 +403,73 @@ func searchString(s, sub string) bool {
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,hostname_status,username,username_status,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,hostname_status,username,username_status,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,process_pid,process_pgid,process_start_ticks,termination_reason,termination_signal,termination_escalated,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.HostnameStatus, r.Username, r.UsernameStatus, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
 		r.CondaStatus, r.CondaEnv, r.CondaPrefix, r.PythonVersion,
 		b2i(r.ResourceSupported), r.ResourceStatus,
 		r.PeakRSSKB, r.CPUTimeMs, r.DiagInfoCount, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
+		r.ProcessPID, r.ProcessPGID, r.ProcessStartTicks, r.TerminationReason, r.TerminationSignal, b2i(r.TerminationEscalated),
 		now, now,
 	)
 }
 
-func (s *Store) GetRun(id string) (*Run, error) {
-	r := &Run{}
-	err := s.db.QueryRow(
-		`SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE id=?`, id,
-	).Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
+const runSelectColumns = `id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,''),COALESCE(process_pid,0),COALESCE(process_pgid,0),COALESCE(process_start_ticks,0),COALESCE(termination_reason,''),COALESCE(termination_signal,''),COALESCE(termination_escalated,0)`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRun(scanner rowScanner, r *Run) error {
+	return scanner.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.HostnameStatus, &r.Username, &r.UsernameStatus,
 		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty,
 		&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus, &r.PeakRSSKB, &r.CPUTimeMs,
-		&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
+		&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource,
+		&r.ProcessPID, &r.ProcessPGID, &r.ProcessStartTicks, &r.TerminationReason, &r.TerminationSignal, &r.TerminationEscalated)
+}
+
+func (s *Store) GetRun(id string) (*Run, error) {
+	r := &Run{}
+	err := scanRun(s.db.QueryRow(`SELECT `+runSelectColumns+` FROM runs WHERE id=?`, id), r)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
 	return r, err
+}
+
+func (s *Store) MarkRunRunning(id string, pid, pgid int, startTicks int64) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.retryExecResult(
+		`UPDATE runs SET status='running', process_pid=?, process_pgid=?, process_start_ticks=?, updated_at=? WHERE id=? AND status='starting'`,
+		pid, pgid, startTicks, now, id,
+	)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("run %s is not in starting state", id)
+	}
+	return nil
+}
+
+func (s *Store) FinalizeRun(id, status string, exitCode int, endedAt string, durationMs int64, reason, signal string, escalated bool) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.retryExecResult(
+		`UPDATE runs SET status=?, exit_code=?, ended_at=?, duration_ms=?, termination_reason=?, termination_signal=?, termination_escalated=?, updated_at=? WHERE id=? AND status IN ('starting','running')`,
+		status, exitCode, endedAt, durationMs, reason, signal, b2i(escalated), now, id,
+	)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
 }
 
 func (s *Store) UpdateRunStatus(id, status string, exitCode int, endedAt string, durationMs int64) error {
@@ -430,7 +513,7 @@ func (s *Store) IncrementRunDiagnostic(id, level, code, lastAt string) error {
 }
 
 func (s *Store) ListRuns(limit int, project, status, tag, search, since, until string, withWarnings bool, host, user string) ([]*Run, error) {
-	q := `SELECT id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,'') FROM runs WHERE 1=1`
+	q := `SELECT ` + runSelectColumns + ` FROM runs WHERE 1=1`
 	args := []any{}
 
 	if project != "" {
@@ -483,11 +566,7 @@ func (s *Store) ListRuns(limit int, project, status, tag, search, since, until s
 	var runs []*Run
 	for rows.Next() {
 		r := &Run{}
-		err := rows.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
-			&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.HostnameStatus, &r.Username, &r.UsernameStatus,
-			&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty,
-			&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus, &r.PeakRSSKB, &r.CPUTimeMs,
-			&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource)
+		err := scanRun(rows, r)
 		if err != nil {
 			return nil, err
 		}

@@ -65,7 +65,15 @@ func TestReconcileRunKeepsMatchingLiveProcess(t *testing.T) {
 	if err := WriteProcessMetadata(runDir, metadata); err != nil {
 		t.Fatal(err)
 	}
-	run := &internal.Run{ID: "live-run", Status: "running", StartedAt: time.Now().UTC().Format(time.RFC3339), RunDir: runDir}
+	run := &internal.Run{
+		ID:                "live-run",
+		Status:            "running",
+		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		RunDir:            runDir,
+		ProcessPID:        metadata.PID,
+		ProcessPGID:       metadata.PGID,
+		ProcessStartTicks: int64(metadata.StartTimeTicks),
+	}
 	if err := store.CreateRun(run); err != nil {
 		t.Fatal(err)
 	}

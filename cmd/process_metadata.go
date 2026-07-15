@@ -6,23 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 )
 
-const ProcessMetadataFile = ".pid"
+const ProcessMetadataFile = "process.json"
 
 // ProcessMetadata identifies both the supervised root process and its process
 // group. StartTimeTicks prevents a recycled PID from being treated as the
-// original run. Legacy integer-only .pid files remain readable.
+// original run.
 type ProcessMetadata struct {
-	Version        int    `json:"version"`
+	Schema         int    `json:"schema"`
 	PID            int    `json:"pid"`
 	PGID           int    `json:"pgid"`
 	StartTimeTicks uint64 `json:"start_time_ticks,omitempty"`
 	CreatedAt      string `json:"created_at"`
-	Legacy         bool   `json:"-"`
 }
 
 type ProcessInspection struct {
@@ -42,7 +39,7 @@ func NewProcessMetadata(pid, pgid int) (ProcessMetadata, error) {
 		return ProcessMetadata{}, fmt.Errorf("read process start time: %w", err)
 	}
 	return ProcessMetadata{
-		Version:        1,
+		Schema:         1,
 		PID:            pid,
 		PGID:           pgid,
 		StartTimeTicks: start,
@@ -51,7 +48,7 @@ func NewProcessMetadata(pid, pgid int) (ProcessMetadata, error) {
 }
 
 func WriteProcessMetadata(runDir string, metadata ProcessMetadata) error {
-	if metadata.PID <= 0 || metadata.PGID <= 0 || metadata.Version != 1 {
+	if metadata.PID <= 0 || metadata.PGID <= 0 || metadata.Schema != 1 || metadata.StartTimeTicks == 0 {
 		return errors.New("invalid process metadata")
 	}
 	data, err := json.Marshal(metadata)
@@ -68,25 +65,27 @@ func ReadProcessMetadata(runDir string) (ProcessMetadata, error) {
 	if err != nil {
 		return ProcessMetadata{}, err
 	}
-	raw := strings.TrimSpace(string(data))
-	if raw == "" {
-		return ProcessMetadata{}, errors.New("empty process metadata")
-	}
-	if !strings.HasPrefix(raw, "{") {
-		pid, err := strconv.Atoi(raw)
-		if err != nil || pid <= 0 {
-			return ProcessMetadata{}, fmt.Errorf("invalid legacy PID %q", raw)
-		}
-		return ProcessMetadata{PID: pid, PGID: pid, Legacy: true}, nil
-	}
 	var metadata ProcessMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return ProcessMetadata{}, fmt.Errorf("parse process metadata: %w", err)
 	}
-	if metadata.Version != 1 || metadata.PID <= 0 || metadata.PGID <= 0 {
+	if metadata.Schema != 1 || metadata.PID <= 0 || metadata.PGID <= 0 || metadata.StartTimeTicks == 0 {
 		return ProcessMetadata{}, errors.New("invalid process metadata fields")
 	}
 	return metadata, nil
+}
+
+// ValidateStoredProcessIdentity ensures the runtime file describes the exact
+// process identity committed to the database when the run entered running.
+func ValidateStoredProcessIdentity(pid, pgid int, startTicks int64, metadata ProcessMetadata) error {
+	if pid <= 0 || pgid <= 0 || startTicks <= 0 {
+		return errors.New("database process identity is incomplete")
+	}
+	if metadata.PID != pid || metadata.PGID != pgid || metadata.StartTimeTicks != uint64(startTicks) {
+		return fmt.Errorf("process identity mismatch: db=%d/%d/%d file=%d/%d/%d",
+			pid, pgid, startTicks, metadata.PID, metadata.PGID, metadata.StartTimeTicks)
+	}
+	return nil
 }
 
 func InspectProcess(metadata ProcessMetadata) ProcessInspection {

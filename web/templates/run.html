@@ -30,8 +30,8 @@
       <span class="detail-actions">
         <button x-show="detail.command" @click="doRerun()" class="btn btn-sm btn-primary">重跑</button>
         <button @click="copyCmd()" class="btn btn-sm btn-outline">复制命令</button>
-        <button x-show="detail.status==='running'" @click="doKill()" class="btn btn-sm btn-danger">终止</button>
-        <button x-show="detail.status!=='running'" @click="doDelete()" class="btn btn-sm btn-subtle">删除</button>
+        <button x-show="detail.status==='running' || detail.status==='starting'" @click="doKill()" class="btn btn-sm btn-danger">终止</button>
+        <button x-show="detail.status!=='running' && detail.status!=='starting'" @click="doDelete()" class="btn btn-sm btn-subtle">删除</button>
       </span>
     </div>
 
@@ -535,7 +535,7 @@
             await this.loadArtifacts();
             this.loadLog();
             this.stopDurationTimer();
-            if (d.status === 'running' && d.started_at) this.startDurationTimer(d.started_at);
+            if ((d.status === 'running' || d.status === 'starting') && d.started_at) this.startDurationTimer(d.started_at);
             if (d.status === 'running') this.loadProcesses();
             if (d.status === 'running') this.connectSSE();
             this.loadStderrSize();

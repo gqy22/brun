@@ -48,10 +48,6 @@ func KillProcessGroup(pgid int, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
-func StopRun(pid int, graceSeconds int, force bool) StopResult {
-	return StopManagedProcess("", ProcessMetadata{PID: pid, PGID: pid, Legacy: true}, graceSeconds, force, "user")
-}
-
 func StopManagedProcess(runDir string, metadata ProcessMetadata, graceSeconds int, force bool, reason string) StopResult {
 	pid := metadata.PID
 	if err := syscall.Kill(pid, 0); err != nil {

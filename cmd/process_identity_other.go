@@ -2,17 +2,30 @@
 
 package cmd
 
-import "syscall"
+import (
+	"syscall"
 
-func processStartTimeTicks(_ int) (uint64, error) { return 0, nil }
+	"github.com/shirou/gopsutil/v4/process"
+)
+
+func processStartTimeTicks(pid int) (uint64, error) {
+	item, err := process.NewProcess(int32(pid))
+	if err != nil {
+		return 0, err
+	}
+	created, err := item.CreateTime()
+	return uint64(created), err
+}
 
 func inspectProcess(metadata ProcessMetadata) ProcessInspection {
 	rootAlive := syscall.Kill(metadata.PID, 0) == nil
+	start, _ := processStartTimeTicks(metadata.PID)
 	return ProcessInspection{
 		RootExists:    rootAlive,
-		IdentityMatch: rootAlive,
+		IdentityMatch: rootAlive && start == metadata.StartTimeTicks,
 		GroupAlive:    processGroupAlive(metadata.PGID),
 		ActualPGID:    metadata.PGID,
+		ActualStart:   start,
 	}
 }
 
