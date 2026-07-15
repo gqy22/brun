@@ -120,15 +120,25 @@ func formatGuideEntry(entry guide.Entry) string {
 	fmt.Fprintf(&b, "ID:       %s\n", entry.ID)
 	fmt.Fprintf(&b, "工具:     %s\n", entry.Tool)
 	fmt.Fprintf(&b, "分类:     %s\n", entry.Category)
+	fmt.Fprintf(&b, "类型:     %s\n", entry.Kind)
 	fmt.Fprintf(&b, "级别:     %s\n", entry.Level)
 	fmt.Fprintf(&b, "状态:     %s\n", entry.Status)
-	fmt.Fprintf(&b, "实测版本: %s\n", strings.Join(entry.ToolVersions.Tested, ", "))
-	fmt.Fprintf(&b, "适用版本: %s\n", entry.ToolVersions.Applicable)
+	fmt.Fprintf(&b, "实测版本: %s\n", displayGuideValues(entry.Versions.Tested))
+	fmt.Fprintf(&b, "文档版本: %s\n", displayGuideValues(entry.Versions.Documented))
 	fmt.Fprintf(&b, "最后验证: %s\n", entry.Updated)
-	fmt.Fprintf(&b, "标签:     %s\n\n", strings.Join(entry.Tags, ", "))
+	fmt.Fprintf(&b, "标签:     %s\n", strings.Join(entry.Tags, ", "))
+	fmt.Fprintf(&b, "证据:     文档 %d · 验证 %d · 基准 %d\n\n",
+		len(entry.Evidence.Docs), len(entry.Evidence.Validations), len(entry.Evidence.Benchmarks))
 	b.WriteString(renderGuideMarkdown(entry.Body))
 	b.WriteByte('\n')
 	return b.String()
+}
+
+func displayGuideValues(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ", ")
 }
 
 func renderGuideMarkdown(markdown string) string {

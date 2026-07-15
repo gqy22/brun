@@ -47,41 +47,51 @@ func TestParseRejectsUnknownMetadata(t *testing.T) {
 }
 
 func TestParseRejectsMissingSection(t *testing.T) {
-	data := strings.Replace(validDocument(), "## 结果检查\n", "", 1)
-	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "结果检查") {
+	data := strings.Replace(validDocument(), "## 推荐方法\n", "", 1)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "推荐方法") {
 		t.Fatalf("Parse() error = %v, want missing section error", err)
+	}
+}
+
+func TestParseRejectsStatusWithoutRequiredEvidence(t *testing.T) {
+	data := strings.Replace(validDocument(), "validations: [bcftools.example]", "validations: []", 1)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "verified") {
+		t.Fatalf("Parse() error = %v, want verified evidence error", err)
 	}
 }
 
 func validDocument() string {
 	return `---
+schema: 2
 id: bcftools.example
 title: 示例
 tool: bcftools
 category: workflow
+kind: practice
 summary: 示例摘要
 tags: [vcf]
 commands: [view]
 level: basic
-status: tested
-tool_versions:
+status: verified
+versions:
   tested: ["1.22.1"]
-  applicable: ">=1.18"
+  documented: ["1.22"]
+evidence:
+  docs:
+    - title: Manual
+      url: https://example.com/manual
+      checked: "2026-07-14"
+  validations: [bcftools.example]
+  benchmarks: []
 updated: "2026-07-14"
 ---
 ## 结论
 x
 ## 适用场景
 x
-## 推荐命令
-x
-## 为什么这样做
-x
-## 并行与资源
+## 推荐方法
 x
 ## 注意事项
-x
-## 结果检查
 x
 ## 依据
 x

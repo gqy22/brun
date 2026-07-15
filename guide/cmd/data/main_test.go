@@ -13,8 +13,9 @@ import (
 func TestLoadDatasetsAndSelectTier(t *testing.T) {
 	root := t.TempDir()
 	document := `
-id: example-smoke
-tier: smoke
+schema: 1
+id: example-correctness
+tier: correctness
 description: example
 source:
   format: vcf.gz
@@ -24,6 +25,16 @@ source:
   checksums:
     - algorithm: sha256
       value: abc
+metadata:
+  assembly: test
+  records: 1
+  samples: 0
+  contigs: 1
+license: test
+accessed: "2026-07-14"
+used_by:
+  guides: []
+  cases: []
 `
 	if err := os.WriteFile(filepath.Join(root, "example.yaml"), []byte(document), 0o644); err != nil {
 		t.Fatal(err)
@@ -32,8 +43,8 @@ source:
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := selectDatasets(datasets, "smoke", "")
-	if len(selected) != 1 || selected[0].ID != "example-smoke" {
+	selected := selectDatasets(datasets, "correctness", "")
+	if len(selected) != 1 || selected[0].ID != "example-correctness" {
 		t.Fatalf("selected = %+v", selected)
 	}
 }

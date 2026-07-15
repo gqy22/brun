@@ -1,3 +1,4 @@
+schema: 1
 id: igsr-grch38-chrx
 tier: smoke
 description: IGSR 1000 Genomes GRCh38 双等位 SNV/INDEL chrX 多样本 VCF
@@ -34,7 +35,8 @@ metadata:
 
 license: IGSR open data; see provider terms
 accessed: "2026-07-14"
-usage:
-  - pipeline-smoke
-  - compression-threads
-  - sample-filtering
+used_by:
+  guides:
+    - bcftools.pipeline-uncompressed
+  cases:
+    - bcftools.pipeline-benchmark

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -26,6 +27,8 @@ type checksum struct {
 }
 
 type artifact struct {
+	Provider  string     `yaml:"provider"`
+	Release   string     `yaml:"release"`
 	Format    string     `yaml:"format"`
 	URL       string     `yaml:"url"`
 	Filename  string     `yaml:"filename"`
@@ -33,12 +36,29 @@ type artifact struct {
 	Checksums []checksum `yaml:"checksums"`
 }
 
+type datasetMetadata struct {
+	Assembly string `yaml:"assembly"`
+	Records  int64  `yaml:"records"`
+	Samples  int    `yaml:"samples"`
+	Contigs  int    `yaml:"contigs"`
+}
+
+type datasetUsage struct {
+	Guides []string `yaml:"guides"`
+	Cases  []string `yaml:"cases"`
+}
+
 type dataset struct {
-	ID          string    `yaml:"id"`
-	Tier        string    `yaml:"tier"`
-	Description string    `yaml:"description"`
-	Source      artifact  `yaml:"source"`
-	Index       *artifact `yaml:"index"`
+	Schema      int             `yaml:"schema"`
+	ID          string          `yaml:"id"`
+	Tier        string          `yaml:"tier"`
+	Description string          `yaml:"description"`
+	Source      artifact        `yaml:"source"`
+	Index       *artifact       `yaml:"index"`
+	Metadata    datasetMetadata `yaml:"metadata"`
+	License     string          `yaml:"license"`
+	Accessed    string          `yaml:"accessed"`
+	UsedBy      datasetUsage    `yaml:"used_by"`
 }
 
 func main() {
@@ -91,7 +111,9 @@ func loadDatasets(root string) ([]dataset, error) {
 			return err
 		}
 		var ds dataset
-		if err := yaml.Unmarshal(data, &ds); err != nil {
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&ds); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		if err := validateDataset(ds); err != nil {
@@ -105,11 +127,26 @@ func loadDatasets(root string) ([]dataset, error) {
 }
 
 func validateDataset(ds dataset) error {
+	if ds.Schema != 1 {
+		return fmt.Errorf("schema 必须为 1，当前为 %d", ds.Schema)
+	}
 	if ds.ID == "" || ds.Tier == "" || ds.Source.URL == "" || ds.Source.Filename == "" {
 		return errors.New("id、tier 和 source 的 url/filename 不能为空")
 	}
 	if ds.Tier != "correctness" && ds.Tier != "smoke" && ds.Tier != "medium" {
 		return fmt.Errorf("未知 tier %q", ds.Tier)
+	}
+	if _, err := time.Parse("2006-01-02", ds.Accessed); err != nil {
+		return fmt.Errorf("accessed 必须使用 YYYY-MM-DD: %w", err)
+	}
+	if ds.License == "" || ds.Metadata.Records <= 0 || ds.Metadata.Contigs <= 0 {
+		return errors.New("license、metadata.records 和 metadata.contigs 不能为空")
+	}
+	if ds.Tier == "smoke" && (ds.Source.Bytes < 10_000_000 || ds.Source.Bytes > 100_000_000) {
+		return fmt.Errorf("smoke 数据压缩大小必须在 10–100 MB，当前为 %d bytes", ds.Source.Bytes)
+	}
+	if ds.Tier == "medium" && (ds.Source.Bytes < 500_000_000 || ds.Source.Bytes > 2_000_000_000) {
+		return fmt.Errorf("medium 数据压缩大小必须在 500 MB–2 GB，当前为 %d bytes", ds.Source.Bytes)
 	}
 	for _, item := range append([]artifact{ds.Source}, optionalArtifact(ds.Index)...) {
 		if item.Bytes <= 0 || len(item.Checksums) == 0 {

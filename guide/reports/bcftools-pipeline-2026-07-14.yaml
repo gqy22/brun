@@ -1,0 +1,24 @@
+schema: 1
+id: bcftools.pipeline-2026-07-14
+guide: bcftools.pipeline-uncompressed
+case: bcftools.pipeline-benchmark
+date: "2026-07-14"
+summary: reports/bcftools-pipeline-2026-07-14.md
+tools:
+  bcftools: "1.22.1"
+  htslib: "1.22.2"
+datasets:
+  - id: igsr-grch38-chrx
+    role: smoke
+    repeats: 3
+    warmups: 1
+    baseline_wall_seconds: 61.847
+    optimized_wall_seconds: 21.693
+    speedup: 2.85
+  - id: igsr-grch38-wgs-sites
+    role: medium-pilot
+    repeats: 1
+    warmups: 0
+    baseline_wall_seconds: 617.00
+    optimized_wall_seconds: 299.14
+    speedup: 2.06

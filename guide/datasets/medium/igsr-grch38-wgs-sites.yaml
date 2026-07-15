@@ -1,3 +1,4 @@
+schema: 1
 id: igsr-grch38-wgs-sites
 tier: medium
 description: IGSR 1000 Genomes GRCh38 双等位 SNV/INDEL 全基因组 sites VCF
@@ -34,8 +35,8 @@ metadata:
 
 license: IGSR open data; see provider terms
 accessed: "2026-07-14"
-usage:
-  - pipeline-medium
-  - compression-threads
-  - parallel-by-contig
-  - view-filter-query
+used_by:
+  guides:
+    - bcftools.pipeline-uncompressed
+  cases:
+    - bcftools.pipeline-benchmark

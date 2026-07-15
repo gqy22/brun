@@ -1,8 +1,10 @@
 ---
+schema: 2
 id: bcftools.pipeline-uncompressed
 title: 管道中间使用未压缩 BCF
 tool: bcftools
 category: performance
+kind: practice
 summary: 多个 bcftools 子命令串联时，中间使用 -Ou，最后一步再压缩输出。
 tags:
   - vcf
@@ -11,14 +13,24 @@ tags:
   - performance
 commands:
   - view
-  - norm
   - filter
 level: basic
 status: benchmarked
-tool_versions:
+versions:
   tested:
     - "1.22.1"
-  applicable: ">=1.18"
+  documented:
+    - "1.22"
+  notes: 更早版本可能支持相同选项，但本条没有逐版本验证。
+evidence:
+  docs:
+    - title: BCFtools manual
+      url: https://samtools.github.io/bcftools/bcftools
+      checked: "2026-07-14"
+  validations:
+    - bcftools.pipeline-equivalence
+  benchmarks:
+    - bcftools.pipeline-2026-07-14
 updated: "2026-07-14"
 ---
 
@@ -29,17 +41,17 @@ updated: "2026-07-14"
 
 ## 适用场景
 
-- `view`、`norm`、`annotate`、`filter` 等流式子命令连续执行。
+- 已验证的 `view` 和 `filter` 等流式子命令连续执行。
 - 中间结果不需要长期保存或随机访问。
 - 最终需要生成压缩 VCF 或 BCF。
 
 如果需要保留中间文件用于审计、断点恢复或随机访问，应保存并为中间文件建立索引。
+其他子命令也可能支持相同方式，但应先确认它们支持相应输入输出类型，不能从本条验证范围直接外推。
 
-## 推荐命令
+## 推荐方法
 
 ```bash
 bcftools view -Ou "{input_vcf}" |
-  bcftools norm -Ou -f "{reference_fasta}" |
   bcftools filter -Oz -o "{output_vcf}"
 ```
 
@@ -80,3 +92,4 @@ diff -u baseline.records optimized.records
 - medium 试跑：977,746,786 字节、78,229,218 条记录，单轮从 617.00 秒降至
   299.14 秒，约为 2.06 倍速度；单轮结果不作为稳定均值。
 - 官方文档：https://samtools.github.io/bcftools/bcftools
+- 证据 ID：`bcftools.pipeline-equivalence`、`bcftools.pipeline-2026-07-14`。

@@ -1,0 +1,13 @@
+schema: 1
+id: bcftools.parallel-by-contig
+guide: bcftools.parallel-by-contig
+datasets:
+  - bcftools-check-1.22
+script: scripts/bcftools/verify.sh
+requires:
+  tools:
+    - bcftools
+assertions:
+  - commands_succeed
+  - records_equal_after_concat
+  - contig_order_preserved

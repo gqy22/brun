@@ -33,6 +33,7 @@ guide-data:
 	go run ./guide/cmd/data --tier $(DATA_TIER)
 
 guide-verify:
+	go test ./internal/guide
 	go run ./guide/cmd/data --tier correctness
 	./guide/scripts/bcftools/verify.sh
 

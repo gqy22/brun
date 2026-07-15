@@ -1,3 +1,4 @@
+schema: 1
 id: bcftools-check-1.22
 tier: correctness
 description: bcftools 1.22 官方测试仓库中的小型多样本 VCF
@@ -21,7 +22,10 @@ metadata:
 
 license: MIT/Expat
 accessed: "2026-07-14"
-usage:
-  - command-correctness
-  - result-equivalence
-
+used_by:
+  guides:
+    - bcftools.pipeline-uncompressed
+    - bcftools.parallel-by-contig
+  cases:
+    - bcftools.pipeline-equivalence
+    - bcftools.parallel-by-contig

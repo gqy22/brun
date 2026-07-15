@@ -1,8 +1,10 @@
 ---
+schema: 2
 id: bcftools.parallel-by-contig
 title: 按染色体并行处理 VCF
 tool: bcftools
 category: parallel
+kind: practice
 summary: 对区域之间相互独立的操作，优先按完整染色体拆分，并按参考顺序合并。
 tags:
   - vcf
@@ -16,10 +18,20 @@ commands:
   - concat
 level: intermediate
 status: verified
-tool_versions:
+versions:
   tested:
     - "1.22.1"
-  applicable: ">=1.18"
+  documented:
+    - "1.22"
+  notes: 更早版本可能支持相同选项，但本条没有逐版本验证。
+evidence:
+  docs:
+    - title: BCFtools manual
+      url: https://samtools.github.io/bcftools/bcftools
+      checked: "2026-07-14"
+  validations:
+    - bcftools.parallel-by-contig
+  benchmarks: []
 updated: "2026-07-14"
 ---
 
@@ -36,7 +48,7 @@ updated: "2026-07-14"
 
 依赖全局统计、跨区域上下文或复杂窗口状态的操作，需要先确认算法语义，不能直接套用。
 
-## 推荐命令
+## 推荐方法
 
 每条染色体独立运行：
 
@@ -87,3 +99,4 @@ diff -u baseline.records parallel.records
 - 实践建议：以完整 contig 作为默认拆分边界，固定窗口拆分属于需要额外验证的高级方案。
 - 本地验证：bcftools 1.22.1，使用官方 `test/check.vcf` 的四个 contig 验证分片合并结果。
 - 官方文档：https://samtools.github.io/bcftools/bcftools
+- 验证 ID：`bcftools.parallel-by-contig`。

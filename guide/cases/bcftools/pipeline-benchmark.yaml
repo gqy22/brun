@@ -1,0 +1,16 @@
+schema: 1
+id: bcftools.pipeline-benchmark
+guide: bcftools.pipeline-uncompressed
+datasets:
+  - igsr-grch38-chrx
+  - igsr-grch38-wgs-sites
+script: scripts/bcftools/bench-pipeline.sh
+requires:
+  tools:
+    - bcftools
+    - /usr/bin/time
+assertions:
+  - commands_succeed
+  - records_equal
+  - wall_time_recorded
+  - peak_rss_recorded
