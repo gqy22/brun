@@ -12,7 +12,7 @@ import (
 )
 
 const maxRetries = 5
-const schemaVersion = 8
+const schemaVersion = 9
 const defaultSQLiteSync = "off"
 
 var retryDelay = 50 * time.Millisecond
@@ -49,6 +49,10 @@ type Run struct {
 	CPUTimeMs            int64
 	ResourceSupported    bool
 	ResourceStatus       string
+	ResourceRequested    string
+	ResourceBackend      string
+	ResourceCgroupPath   string
+	ResourceFallback     string
 	DiagInfoCount        int
 	DiagWarningCount     int
 	DiagErrorCount       int
@@ -62,6 +66,13 @@ type Run struct {
 	TerminationReason    string
 	TerminationSignal    string
 	TerminationEscalated bool
+	MemoryPeakBytes      int64
+	CPUUserMs            int64
+	CPUSystemMs          int64
+	IOReadBytes          int64
+	IOWriteBytes         int64
+	OOMKillCount         int64
+	PIDsPeak             int64
 }
 
 type Artifact struct {
@@ -213,7 +224,18 @@ func (s *Store) migrate() error {
 			python_version TEXT,
 			resource_supported INTEGER DEFAULT 0,
 			resource_status TEXT,
+			resource_requested TEXT,
+			resource_backend TEXT,
+			resource_cgroup_path TEXT,
+			resource_fallback TEXT,
 			peak_rss_kb INTEGER DEFAULT 0, cpu_time_ms INTEGER DEFAULT 0,
+			memory_peak_bytes INTEGER DEFAULT 0,
+			cpu_user_ms INTEGER DEFAULT 0,
+			cpu_system_ms INTEGER DEFAULT 0,
+			io_read_bytes INTEGER DEFAULT 0,
+			io_write_bytes INTEGER DEFAULT 0,
+			oom_kill_count INTEGER DEFAULT 0,
+			pids_peak INTEGER DEFAULT 0,
 			diag_info_count INTEGER DEFAULT 0,
 			diag_warning_count INTEGER DEFAULT 0,
 			diag_error_count INTEGER DEFAULT 0,
@@ -279,6 +301,17 @@ func (s *Store) migrate() error {
 		`ALTER TABLE runs ADD COLUMN termination_reason TEXT`,
 		`ALTER TABLE runs ADD COLUMN termination_signal TEXT`,
 		`ALTER TABLE runs ADD COLUMN termination_escalated INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN resource_requested TEXT`,
+		`ALTER TABLE runs ADD COLUMN resource_backend TEXT`,
+		`ALTER TABLE runs ADD COLUMN resource_cgroup_path TEXT`,
+		`ALTER TABLE runs ADD COLUMN resource_fallback TEXT`,
+		`ALTER TABLE runs ADD COLUMN memory_peak_bytes INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN cpu_user_ms INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN cpu_system_ms INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN io_read_bytes INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN io_write_bytes INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN oom_kill_count INTEGER DEFAULT 0`,
+		`ALTER TABLE runs ADD COLUMN pids_peak INTEGER DEFAULT 0`,
 		// 迁移回填：老 run 已有 hostname/username 文本，但 *_status 还是 NULL。
 		// 已有值说明采集成功，新状态记 ok；空字符串 / NULL 说明采集失败，
 		// 新状态记 unavailable。这两步是幂等的，重复执行也是 no-op。
@@ -403,20 +436,21 @@ func searchString(s, sub string) bool {
 func (s *Store) CreateRun(r *Run) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return s.retryExec(
-		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,hostname_status,username,username_status,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,process_pid,process_pgid,process_start_ticks,termination_reason,termination_signal,termination_escalated,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runs (id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,hostname_status,username,username_status,git_repo,git_branch,git_commit,git_dirty,conda_status,conda_env,conda_prefix,python_version,resource_supported,resource_status,resource_requested,resource_backend,resource_cgroup_path,resource_fallback,peak_rss_kb,cpu_time_ms,memory_peak_bytes,cpu_user_ms,cpu_system_ms,io_read_bytes,io_write_bytes,oom_kill_count,pids_peak,diag_info_count,diag_warning_count,diag_error_count,diag_last_code,diag_last_at,cwd_source,project_source,process_pid,process_pgid,process_start_ticks,termination_reason,termination_signal,termination_escalated,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Name, r.Project, r.CWD, r.Command, r.Status, r.ExitCode,
 		r.StartedAt, r.EndedAt, r.DurationMs,
 		r.RunDir, r.Hostname, r.HostnameStatus, r.Username, r.UsernameStatus, r.GitRepo, r.GitBranch, r.GitCommit, b2i(r.GitDirty),
 		r.CondaStatus, r.CondaEnv, r.CondaPrefix, r.PythonVersion,
-		b2i(r.ResourceSupported), r.ResourceStatus,
-		r.PeakRSSKB, r.CPUTimeMs, r.DiagInfoCount, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
+		b2i(r.ResourceSupported), r.ResourceStatus, r.ResourceRequested, r.ResourceBackend, r.ResourceCgroupPath, r.ResourceFallback,
+		r.PeakRSSKB, r.CPUTimeMs, r.MemoryPeakBytes, r.CPUUserMs, r.CPUSystemMs, r.IOReadBytes, r.IOWriteBytes, r.OOMKillCount, r.PIDsPeak,
+		r.DiagInfoCount, r.DiagWarningCount, r.DiagErrorCount, r.DiagLastCode, r.DiagLastAt, r.CWDSource, r.ProjectSource,
 		r.ProcessPID, r.ProcessPGID, r.ProcessStartTicks, r.TerminationReason, r.TerminationSignal, b2i(r.TerminationEscalated),
 		now, now,
 	)
 }
 
-const runSelectColumns = `id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),peak_rss_kb,cpu_time_ms,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,''),COALESCE(process_pid,0),COALESCE(process_pgid,0),COALESCE(process_start_ticks,0),COALESCE(termination_reason,''),COALESCE(termination_signal,''),COALESCE(termination_escalated,0)`
+const runSelectColumns = `id,name,project,cwd,command,status,exit_code,started_at,ended_at,duration_ms,run_dir,hostname,COALESCE(hostname_status,''),username,COALESCE(username_status,''),git_repo,git_branch,git_commit,git_dirty,COALESCE(conda_status,''),COALESCE(conda_env,''),COALESCE(conda_prefix,''),COALESCE(python_version,''),resource_supported,COALESCE(resource_status,''),COALESCE(resource_requested,''),COALESCE(resource_backend,''),COALESCE(resource_cgroup_path,''),COALESCE(resource_fallback,''),peak_rss_kb,cpu_time_ms,memory_peak_bytes,cpu_user_ms,cpu_system_ms,io_read_bytes,io_write_bytes,oom_kill_count,pids_peak,diag_info_count,diag_warning_count,diag_error_count,COALESCE(diag_last_code,''),COALESCE(diag_last_at,''),COALESCE(cwd_source,''),COALESCE(project_source,''),COALESCE(process_pid,0),COALESCE(process_pgid,0),COALESCE(process_start_ticks,0),COALESCE(termination_reason,''),COALESCE(termination_signal,''),COALESCE(termination_escalated,0)`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -426,7 +460,9 @@ func scanRun(scanner rowScanner, r *Run) error {
 	return scanner.Scan(&r.ID, &r.Name, &r.Project, &r.CWD, &r.Command, &r.Status, &r.ExitCode,
 		&r.StartedAt, &r.EndedAt, &r.DurationMs, &r.RunDir, &r.Hostname, &r.HostnameStatus, &r.Username, &r.UsernameStatus,
 		&r.GitRepo, &r.GitBranch, &r.GitCommit, &r.GitDirty,
-		&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus, &r.PeakRSSKB, &r.CPUTimeMs,
+		&r.CondaStatus, &r.CondaEnv, &r.CondaPrefix, &r.PythonVersion, &r.ResourceSupported, &r.ResourceStatus,
+		&r.ResourceRequested, &r.ResourceBackend, &r.ResourceCgroupPath, &r.ResourceFallback,
+		&r.PeakRSSKB, &r.CPUTimeMs, &r.MemoryPeakBytes, &r.CPUUserMs, &r.CPUSystemMs, &r.IOReadBytes, &r.IOWriteBytes, &r.OOMKillCount, &r.PIDsPeak,
 		&r.DiagInfoCount, &r.DiagWarningCount, &r.DiagErrorCount, &r.DiagLastCode, &r.DiagLastAt, &r.CWDSource, &r.ProjectSource,
 		&r.ProcessPID, &r.ProcessPGID, &r.ProcessStartTicks, &r.TerminationReason, &r.TerminationSignal, &r.TerminationEscalated)
 }
@@ -484,6 +520,15 @@ func (s *Store) UpdateRunResources(id string, peakRSSKB, cpuTimeMs int64, suppor
 	return s.retryExec(
 		`UPDATE runs SET peak_rss_kb=?, cpu_time_ms=?, resource_supported=?, resource_status=? WHERE id=?`,
 		peakRSSKB, cpuTimeMs, b2i(supported), status, id,
+	)
+}
+
+func (s *Store) UpdateRunResourceMetrics(id string, r *Run) error {
+	return s.retryExec(
+		`UPDATE runs SET resource_supported=?, resource_status=?, resource_requested=?, resource_backend=?, resource_cgroup_path=?, resource_fallback=?, peak_rss_kb=?, cpu_time_ms=?, memory_peak_bytes=?, cpu_user_ms=?, cpu_system_ms=?, io_read_bytes=?, io_write_bytes=?, oom_kill_count=?, pids_peak=?, updated_at=? WHERE id=?`,
+		b2i(r.ResourceSupported), r.ResourceStatus, r.ResourceRequested, r.ResourceBackend, r.ResourceCgroupPath, r.ResourceFallback,
+		r.PeakRSSKB, r.CPUTimeMs, r.MemoryPeakBytes, r.CPUUserMs, r.CPUSystemMs, r.IOReadBytes, r.IOWriteBytes, r.OOMKillCount, r.PIDsPeak,
+		time.Now().UTC().Format(time.RFC3339), id,
 	)
 }
 

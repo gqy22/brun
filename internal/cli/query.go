@@ -161,6 +161,17 @@ func showCmd() *cobra.Command {
 				CPUTimeMs:            r.CPUTimeMs,
 				ResourceSupported:    r.ResourceSupported,
 				ResourceStatus:       r.ResourceStatus,
+				ResourceRequested:    r.ResourceRequested,
+				ResourceBackend:      r.ResourceBackend,
+				ResourceCgroupPath:   r.ResourceCgroupPath,
+				ResourceFallback:     r.ResourceFallback,
+				MemoryPeakBytes:      r.MemoryPeakBytes,
+				CPUUserMs:            r.CPUUserMs,
+				CPUSystemMs:          r.CPUSystemMs,
+				IOReadBytes:          r.IOReadBytes,
+				IOWriteBytes:         r.IOWriteBytes,
+				OOMKillCount:         r.OOMKillCount,
+				PIDsPeak:             r.PIDsPeak,
 				GitRepo:              r.GitRepo,
 				GitCommit:            r.GitCommit,
 				GitDirty:             r.GitDirty,
@@ -216,6 +227,17 @@ type runJSONPayload struct {
 	ResourceStatus       string                     `json:"resource_status,omitempty"`
 	PeakRSSKB            int64                      `json:"peak_rss_kb"`
 	CPUTimeMs            int64                      `json:"cpu_time_ms"`
+	ResourceRequested    string                     `json:"resource_requested,omitempty"`
+	ResourceBackend      string                     `json:"resource_backend,omitempty"`
+	ResourceCgroupPath   string                     `json:"resource_cgroup_path,omitempty"`
+	ResourceFallback     string                     `json:"resource_fallback,omitempty"`
+	MemoryPeakBytes      int64                      `json:"memory_peak_bytes"`
+	CPUUserMs            int64                      `json:"cpu_user_ms"`
+	CPUSystemMs          int64                      `json:"cpu_system_ms"`
+	IOReadBytes          int64                      `json:"io_read_bytes"`
+	IOWriteBytes         int64                      `json:"io_write_bytes"`
+	OOMKillCount         int64                      `json:"oom_kill_count"`
+	PIDsPeak             int64                      `json:"pids_peak"`
 	Tags                 []string                   `json:"tags,omitempty"`
 	Note                 string                     `json:"note,omitempty"`
 	DiagnosticSummary    internal.DiagnosticSummary `json:"diagnostic_summary"`
@@ -259,6 +281,17 @@ func runJSON(r *internal.Run, tags []string, note string) runJSONPayload {
 		ResourceStatus:       r.ResourceStatus,
 		PeakRSSKB:            r.PeakRSSKB,
 		CPUTimeMs:            r.CPUTimeMs,
+		ResourceRequested:    r.ResourceRequested,
+		ResourceBackend:      r.ResourceBackend,
+		ResourceCgroupPath:   r.ResourceCgroupPath,
+		ResourceFallback:     r.ResourceFallback,
+		MemoryPeakBytes:      r.MemoryPeakBytes,
+		CPUUserMs:            r.CPUUserMs,
+		CPUSystemMs:          r.CPUSystemMs,
+		IOReadBytes:          r.IOReadBytes,
+		IOWriteBytes:         r.IOWriteBytes,
+		OOMKillCount:         r.OOMKillCount,
+		PIDsPeak:             r.PIDsPeak,
 		Tags:                 tags,
 		Note:                 note,
 		DiagnosticSummary:    internal.DiagnosticSummaryFromRun(r),

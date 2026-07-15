@@ -43,6 +43,17 @@ type RunDetail struct {
 	CPUTimeMs            int64
 	ResourceSupported    bool
 	ResourceStatus       string
+	ResourceRequested    string
+	ResourceBackend      string
+	ResourceCgroupPath   string
+	ResourceFallback     string
+	MemoryPeakBytes      int64
+	CPUUserMs            int64
+	CPUSystemMs          int64
+	IOReadBytes          int64
+	IOWriteBytes         int64
+	OOMKillCount         int64
+	PIDsPeak             int64
 	GitRepo              string
 	GitCommit            string
 	GitDirty             bool
@@ -415,6 +426,28 @@ func FormatShow(r *RunDetail) string {
 			fmt.Fprintf(&b, " (unsupported)")
 		}
 		b.WriteString("\n")
+	}
+	if r.ResourceBackend != "" {
+		fmt.Fprintf(&b, "%s  %s", Bold("Resource Backend:"), r.ResourceBackend)
+		if r.ResourceRequested != "" && r.ResourceRequested != r.ResourceBackend {
+			fmt.Fprintf(&b, " (requested %s)", r.ResourceRequested)
+		}
+		b.WriteString("\n")
+	}
+	if r.ResourceFallback != "" {
+		fmt.Fprintf(&b, "%s  %s\n", Bold("Resource Fallback:"), r.ResourceFallback)
+	}
+	if r.MemoryPeakBytes > 0 {
+		fmt.Fprintf(&b, "%s  %s (cgroup charged)\n", Bold("Memory Peak:"), FormatSize(r.MemoryPeakBytes))
+	}
+	if r.CPUUserMs > 0 || r.CPUSystemMs > 0 {
+		fmt.Fprintf(&b, "%s  user %s / system %s\n", Bold("CPU Breakdown:"), fmtCPU(r.CPUUserMs), fmtCPU(r.CPUSystemMs))
+	}
+	if r.IOReadBytes > 0 || r.IOWriteBytes > 0 {
+		fmt.Fprintf(&b, "%s  read %s / write %s\n", Bold("I/O:"), FormatSize(r.IOReadBytes), FormatSize(r.IOWriteBytes))
+	}
+	if r.PIDsPeak > 0 || r.OOMKillCount > 0 {
+		fmt.Fprintf(&b, "%s  pids peak %d / oom kills %d\n", Bold("Resource Events:"), r.PIDsPeak, r.OOMKillCount)
 	}
 	fmt.Fprintf(&b, "%s  %d\n", Bold("Exit Code:"), r.ExitCode)
 	if r.Diag.WarningCount > 0 || r.Diag.ErrorCount > 0 {

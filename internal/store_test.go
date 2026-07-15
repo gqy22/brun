@@ -46,6 +46,11 @@ func TestStore_CreateRun(t *testing.T) {
 		PythonVersion:     "Python 3.11.8",
 		ResourceSupported: true,
 		ResourceStatus:    "ok",
+		ResourceRequested: "auto",
+		ResourceBackend:   "cgroup_v2",
+		MemoryPeakBytes:   2048,
+		CPUUserMs:         20,
+		CPUSystemMs:       5,
 		PeakRSSKB:         1024,
 		CPUTimeMs:         25,
 		CWDSource:         "explicit",
@@ -75,6 +80,9 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if !got.ResourceSupported || got.ResourceStatus != "ok" || got.PeakRSSKB != 1024 || got.CPUTimeMs != 25 {
 		t.Errorf("resources = %+v, want supported ok 1024/25", got)
+	}
+	if got.ResourceRequested != "auto" || got.ResourceBackend != "cgroup_v2" || got.MemoryPeakBytes != 2048 || got.CPUUserMs != 20 || got.CPUSystemMs != 5 {
+		t.Errorf("extended resources = %+v", got)
 	}
 	if got.Hostname != "devbox" || got.HostnameStatus != "ok" {
 		t.Errorf("hostname = %q/%q, want devbox/ok", got.Hostname, got.HostnameStatus)
@@ -543,7 +551,7 @@ func TestStore_MigrateBackfillsEnvStatus(t *testing.T) {
 	dir := fastTempDir(t)
 	dbPath := filepath.Join(dir, "test.db")
 
-	// 1) 准备一个 v5 状态的老库：schema 升级到当前版本（v8），并模拟两个老 run。
+	// 1) 准备一个 v5 状态的老库：schema 升级到当前版本（v9），并模拟两个老 run。
 	//    r-ok 已经采集到 hostname/username；r-empty 没有值。
 	//    然后把 user_version 拨回 5，模拟"v5 老库"等待升级。
 	s, err := NewStore(dbPath)
@@ -569,7 +577,7 @@ func TestStore_MigrateBackfillsEnvStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2) 重新打开：触发 v5→v8 迁移，UPDATE 回填应该把状态从 NULL 写成 ok / unavailable
+	// 2) 重新打开：触发 v5→v9 迁移，UPDATE 回填应该把状态从 NULL 写成 ok / unavailable
 	s, err = NewStore(dbPath)
 	if err != nil {
 		t.Fatal(err)

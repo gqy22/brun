@@ -14,6 +14,7 @@ import (
 
 	"github.com/biotools/brun/cmd"
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 	"github.com/spf13/cobra"
 )
 
@@ -63,16 +64,21 @@ func runCmd() *cobra.Command {
 	var cwdFlag string
 	var foreground bool
 	var runIDFlag string
+	var resourceBackend string
 
 	c := &cobra.Command{
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			resourceMode, err := resourcepkg.ParseMode(resourceBackend)
+			if err != nil {
+				return cliError("invalid_resource_backend", err.Error(), "使用 auto、proc 或 cgroup", err)
+			}
 			if foreground {
 				return executeRun(args, name, project, note, tags,
-					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag, runIDFlag)
+					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag, runIDFlag, string(resourceMode))
 			}
 			return detachRun(c, args, name, project, note, tags,
-				noFsDiff, allowExit, timeout, cwdFlag)
+				noFsDiff, allowExit, timeout, cwdFlag, string(resourceMode))
 		},
 	}
 	c.Flags().StringVarP(&name, "name", "n", "", "run 名称")
@@ -85,13 +91,14 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录；不传时从脚本路径或当前目录推断")
 	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
 	c.Flags().StringVar(&runIDFlag, "run-id", "", "内部使用: 指定 run ID")
+	c.Flags().StringVar(&resourceBackend, "resource-backend", "auto", "资源后端: auto、proc 或 cgroup")
 	c.Flags().MarkHidden("run-id")
 	ht.Inject(c)
 	return c
 }
 
 func executeRun(args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string) error {
+	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string, resourceMode string) error {
 
 	// 后台模式: 忽略 SIGHUP，关闭终端后继续运行 (等效 nohup)
 	signal.Ignore(syscall.SIGHUP)
@@ -189,28 +196,34 @@ func executeRun(args []string, name, project, note string, tags []string,
 	host, hostStatus := hostname()
 	user, userStatus := username()
 	runRecord := &internal.Run{
-		ID:             runID,
-		Name:           name,
-		Project:        projName,
-		CWD:            cwd,
-		Command:        commandStr,
-		Status:         "starting",
-		RunDir:         runDir,
-		StartedAt:      now,
-		Hostname:       host,
-		HostnameStatus: hostStatus,
-		Username:       user,
-		UsernameStatus: userStatus,
-		GitRepo:        gitInfo.Repo,
-		GitBranch:      gitInfo.Branch,
-		GitCommit:      gitInfo.Commit,
-		GitDirty:       gitInfo.Dirty,
-		CondaStatus:    condaInfo.Status,
-		CondaEnv:       condaInfo.Env,
-		CondaPrefix:    condaInfo.Prefix,
-		PythonVersion:  condaInfo.PythonVersion,
-		CWDSource:      cwdSource,
-		ProjectSource:  projectSource,
+		ID:                runID,
+		Name:              name,
+		Project:           projName,
+		CWD:               cwd,
+		Command:           commandStr,
+		Status:            "starting",
+		RunDir:            runDir,
+		StartedAt:         now,
+		Hostname:          host,
+		HostnameStatus:    hostStatus,
+		Username:          user,
+		UsernameStatus:    userStatus,
+		GitRepo:           gitInfo.Repo,
+		GitBranch:         gitInfo.Branch,
+		GitCommit:         gitInfo.Commit,
+		GitDirty:          gitInfo.Dirty,
+		CondaStatus:       condaInfo.Status,
+		CondaEnv:          condaInfo.Env,
+		CondaPrefix:       condaInfo.Prefix,
+		PythonVersion:     condaInfo.PythonVersion,
+		CWDSource:         cwdSource,
+		ProjectSource:     projectSource,
+		ResourceRequested: resourceMode,
+	}
+	if cmd.ResourceSupported() {
+		runRecord.ResourceBackend = "proc"
+	} else {
+		runRecord.ResourceBackend = "unsupported"
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
@@ -488,7 +501,7 @@ func syncRunDiagnostics(store *internal.Store, runID, runDir string) {
 
 // detachRun 将命令以后台 nohup 方式执行，等效于 nohup cmd > out.o 2> out.er &
 func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout int, cwdFlag string) error {
+	noFsDiff bool, allowExit string, timeout int, cwdFlag string, resourceMode string) error {
 
 	// 生成 run ID，父进程和子进程共享，确保提示、日志路径和数据库记录一致。
 	runID := internal.GenerateRunID()
@@ -520,6 +533,7 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 	if cwdFlag != "" {
 		childArgs = append(childArgs, "--cwd", cwdFlag)
 	}
+	childArgs = append(childArgs, "--resource-backend", resourceMode)
 	childArgs = append(childArgs, "--")
 	childArgs = append(childArgs, args...)
 

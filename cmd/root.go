@@ -344,11 +344,44 @@ func BuildMetadataYAML(run *internal.Run) string {
 	if run.ResourceStatus != "" {
 		fmt.Fprintf(&b, "resource_status: %s\n", run.ResourceStatus)
 	}
+	if run.ResourceRequested != "" {
+		fmt.Fprintf(&b, "resource_requested: %s\n", run.ResourceRequested)
+	}
+	if run.ResourceBackend != "" {
+		fmt.Fprintf(&b, "resource_backend: %s\n", run.ResourceBackend)
+	}
+	if run.ResourceCgroupPath != "" {
+		fmt.Fprintf(&b, "resource_cgroup_path: %s\n", run.ResourceCgroupPath)
+	}
+	if run.ResourceFallback != "" {
+		fmt.Fprintf(&b, "resource_fallback: %s\n", run.ResourceFallback)
+	}
 	if run.PeakRSSKB > 0 {
 		fmt.Fprintf(&b, "peak_rss_kb: %d\n", run.PeakRSSKB)
 	}
 	if run.CPUTimeMs > 0 {
 		fmt.Fprintf(&b, "cpu_time_ms: %d\n", run.CPUTimeMs)
+	}
+	if run.MemoryPeakBytes > 0 {
+		fmt.Fprintf(&b, "memory_peak_bytes: %d\n", run.MemoryPeakBytes)
+	}
+	if run.CPUUserMs > 0 {
+		fmt.Fprintf(&b, "cpu_user_ms: %d\n", run.CPUUserMs)
+	}
+	if run.CPUSystemMs > 0 {
+		fmt.Fprintf(&b, "cpu_system_ms: %d\n", run.CPUSystemMs)
+	}
+	if run.IOReadBytes > 0 {
+		fmt.Fprintf(&b, "io_read_bytes: %d\n", run.IOReadBytes)
+	}
+	if run.IOWriteBytes > 0 {
+		fmt.Fprintf(&b, "io_write_bytes: %d\n", run.IOWriteBytes)
+	}
+	if run.OOMKillCount > 0 {
+		fmt.Fprintf(&b, "oom_kill_count: %d\n", run.OOMKillCount)
+	}
+	if run.PIDsPeak > 0 {
+		fmt.Fprintf(&b, "pids_peak: %d\n", run.PIDsPeak)
 	}
 	if run.DiagInfoCount > 0 {
 		fmt.Fprintf(&b, "diag_info_count: %d\n", run.DiagInfoCount)

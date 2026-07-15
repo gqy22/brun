@@ -254,7 +254,7 @@ func TestExecuteRunWritesDiagnostics(t *testing.T) {
 	t.Setenv("BRUN_HOME", home)
 	cwd := fastTempDir(t)
 
-	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, ""); err != nil {
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", "auto"); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestExecuteRunFailsOnInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "")
+	err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", "auto")
 	if err == nil || !strings.Contains(err.Error(), "项目配置错误") {
 		t.Fatalf("executeRun() error = %v, want config error", err)
 	}
@@ -310,7 +310,7 @@ func TestExecuteRunRecordsMissingCommandAsFailed(t *testing.T) {
 	t.Setenv("BRUN_HOME", home)
 	cwd := fastTempDir(t)
 
-	if err := executeRun([]string{"nonexistent_command_abc123"}, "bad-cmd", "error-test", "", nil, true, "", 0, cwd, ""); err != nil {
+	if err := executeRun([]string{"nonexistent_command_abc123"}, "bad-cmd", "error-test", "", nil, true, "", 0, cwd, "", "auto"); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestExecuteRunUsesProvidedRunID(t *testing.T) {
 	cwd := fastTempDir(t)
 	runID := "20260605-091500-fixed1"
 
-	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, runID); err != nil {
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, runID, "auto"); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 

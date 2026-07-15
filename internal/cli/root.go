@@ -39,7 +39,7 @@ func Execute(opts Options) error {
 			if len(args) == 0 {
 				return c.Help()
 			}
-			return detachRun(c, args, "", "", "", nil, false, "", 0, "")
+			return detachRun(c, args, "", "", "", nil, false, "", 0, "", "auto")
 		},
 	}
 	MustParse("root").Inject(rootCmd)

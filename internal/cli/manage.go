@@ -240,7 +240,7 @@ func rerunCmd() *cobra.Command {
 				}
 			}
 			return executeRun(cmd.ShellCommandArgs(cmdStr), name, r.Project, "", tags,
-				false, "", 0, execCWD, "")
+				false, "", 0, execCWD, "", "auto")
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")
@@ -439,8 +439,19 @@ type runMetadata struct {
 	PythonVersion        string `yaml:"python_version"`
 	ResourceSupported    bool   `yaml:"resource_supported"`
 	ResourceStatus       string `yaml:"resource_status"`
+	ResourceRequested    string `yaml:"resource_requested"`
+	ResourceBackend      string `yaml:"resource_backend"`
+	ResourceCgroupPath   string `yaml:"resource_cgroup_path"`
+	ResourceFallback     string `yaml:"resource_fallback"`
 	PeakRSSKB            int64  `yaml:"peak_rss_kb"`
 	CPUTimeMs            int64  `yaml:"cpu_time_ms"`
+	MemoryPeakBytes      int64  `yaml:"memory_peak_bytes"`
+	CPUUserMs            int64  `yaml:"cpu_user_ms"`
+	CPUSystemMs          int64  `yaml:"cpu_system_ms"`
+	IOReadBytes          int64  `yaml:"io_read_bytes"`
+	IOWriteBytes         int64  `yaml:"io_write_bytes"`
+	OOMKillCount         int64  `yaml:"oom_kill_count"`
+	PIDsPeak             int64  `yaml:"pids_peak"`
 	CWDSource            string `yaml:"cwd_source"`
 	ProjectSource        string `yaml:"project_source"`
 	DiagInfoCount        int    `yaml:"diag_info_count"`
@@ -491,8 +502,19 @@ func readRunMetadata(path string) (*internal.Run, error) {
 		PythonVersion:        meta.PythonVersion,
 		ResourceSupported:    meta.ResourceSupported,
 		ResourceStatus:       meta.ResourceStatus,
+		ResourceRequested:    meta.ResourceRequested,
+		ResourceBackend:      meta.ResourceBackend,
+		ResourceCgroupPath:   meta.ResourceCgroupPath,
+		ResourceFallback:     meta.ResourceFallback,
 		PeakRSSKB:            meta.PeakRSSKB,
 		CPUTimeMs:            meta.CPUTimeMs,
+		MemoryPeakBytes:      meta.MemoryPeakBytes,
+		CPUUserMs:            meta.CPUUserMs,
+		CPUSystemMs:          meta.CPUSystemMs,
+		IOReadBytes:          meta.IOReadBytes,
+		IOWriteBytes:         meta.IOWriteBytes,
+		OOMKillCount:         meta.OOMKillCount,
+		PIDsPeak:             meta.PIDsPeak,
 		CWDSource:            meta.CWDSource,
 		ProjectSource:        meta.ProjectSource,
 		DiagInfoCount:        meta.DiagInfoCount,
