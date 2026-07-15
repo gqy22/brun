@@ -132,6 +132,19 @@ func executeRun(args []string, name, project, note string, tags []string,
 	if cwdSource == "inferred" {
 		diagnostics.Info("cwd_inferred", "已推断运行目录", cwd)
 	}
+	mode, err := resourcepkg.ParseMode(resourceMode)
+	if err != nil {
+		return cliError("invalid_resource_backend", err.Error(), "使用 auto、proc 或 cgroup", err)
+	}
+	resourceDecision, err := resourcepkg.Decide(mode)
+	if err != nil {
+		return cliError("resource_backend_unavailable", err.Error(),
+			"使用 systemd-run --user --scope --property=Delegate=yes 获取委派，或改用 --resource-backend proc", err)
+	}
+	if resourceDecision.Fallback != "" {
+		diagnostics.Warning("resource_backend_fallback", "资源后端已降级",
+			fmt.Sprintf("requested=%s backend=%s reason=%s", resourceDecision.Requested, resourceDecision.Backend, resourceDecision.Fallback))
+	}
 
 	// 3. 识别 project + 读 brun.yaml
 	projName, projRoot, projectSource, err := internal.DetectProject(cwd, internal.WithCLIProject(project))
@@ -218,12 +231,13 @@ func executeRun(args []string, name, project, note string, tags []string,
 		PythonVersion:     condaInfo.PythonVersion,
 		CWDSource:         cwdSource,
 		ProjectSource:     projectSource,
-		ResourceRequested: resourceMode,
+		ResourceRequested: resourceDecision.Requested,
+		ResourceBackend:   resourceDecision.Backend,
+		ResourceFallback:  resourceDecision.Fallback,
+		ResourceSupported: resourceDecision.Backend != resourcepkg.BackendUnsupported,
 	}
-	if cmd.ResourceSupported() {
-		runRecord.ResourceBackend = "proc"
-	} else {
-		runRecord.ResourceBackend = "unsupported"
+	if resourceDecision.Backend == resourcepkg.BackendCgroupV2 {
+		runRecord.ResourceCgroupPath = resourceDecision.Env.CurrentPath
 	}
 	if err := store.CreateRun(runRecord); err != nil {
 		return fmt.Errorf("写入数据库失败: %w", err)
