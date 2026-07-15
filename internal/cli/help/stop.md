@@ -3,7 +3,7 @@ use: "stop [<run_id> | --latest]"
 short: "终止运行中的任务"
 long: |
   向运行中的任务发送终止信号（SIGTERM），等待优雅退出后强制结束（SIGKILL）。
-  终止的是整个进程组，包括所有子进程。任务状态会自动更新为 failed。
+  终止的是整个进程组，包括所有子进程。确认进程组退出后，任务状态更新为 cancelled。
 example: |
   brun stop 20260605-145615-fed727
   brun stop --latest
@@ -17,5 +17,7 @@ output: |
 
   使用 --force (-f) 跳过宽限期，直接发送 SIGKILL。
 
-  对已结束（success/failed/cancelled）的 run 执行 stop 会报错。
+  brun 会校验记录中的 PID、PGID 和进程启动时间，PID 已被复用时拒绝发送信号。
+
+  对已结束（success/failed/cancelled/timed_out）的 run 执行 stop 会报错。
 ---

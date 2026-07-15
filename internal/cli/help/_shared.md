@@ -26,6 +26,8 @@
 | `failed_with_warnings` | 失败且诊断链路有 warning |
 | `cancelled` | 被用户终止 |
 | `cancelled_with_warnings` | 被终止且诊断有 warning |
+| `timed_out` | 达到运行超时限制 |
+| `timed_out_with_warnings` | 超时且诊断有 warning |
 
 ## 时间过滤语法
 

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/biotools/brun/internal"
@@ -129,12 +128,15 @@ func (s *WebServer) apiListRuns(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if _, err := ReconcileRunningRuns(s.store, 200); err != nil {
+		internal.Log().Warn("api_reconcile_failed", "error", err.Error())
+	}
 
 	// display_status=success_with_warnings 等：翻译成 status + diag_warning_count>0 的 DB 过滤。
 	withWarnings := false
 	if displayStatus != "" {
 		switch displayStatus {
-		case "success_with_warnings", "failed_with_warnings", "cancelled_with_warnings":
+		case "success_with_warnings", "failed_with_warnings", "cancelled_with_warnings", "timed_out_with_warnings":
 			withWarnings = true
 			if status == "" {
 				status = strings.TrimSuffix(displayStatus, "_with_warnings")
@@ -188,6 +190,13 @@ func (s *WebServer) apiGetRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpError(w, err.Error(), 404)
 		return
+	}
+	if run.Status == "running" {
+		if _, reconcileErr := ReconcileRun(s.store, run); reconcileErr != nil {
+			internal.Log().Warn("api_reconcile_failed", "run_id", run.ID, "error", reconcileErr.Error())
+		} else if refreshed, getErr := s.store.GetRun(id); getErr == nil {
+			run = refreshed
+		}
 	}
 
 	tags, _ := s.store.GetTags(run.ID)
@@ -518,39 +527,44 @@ func (s *WebServer) apiKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pidFile := filepath.Join(run.RunDir, ".pid")
-	data, err := os.ReadFile(pidFile)
+	if _, reconcileErr := ReconcileRun(s.store, run); reconcileErr != nil {
+		httpError(w, reconcileErr.Error(), 500)
+		return
+	}
+	run, err = s.store.GetRun(id)
+	if err != nil || run.Status != "running" {
+		httpError(w, "任务已经结束", 409)
+		return
+	}
+	metadata, err := ReadProcessMetadata(run.RunDir)
 	if err != nil {
 		httpError(w, "找不到进程信息（可能已结束）", 404)
 		return
 	}
 
-	var pid int
-	fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid)
-	if pid <= 0 {
-		httpError(w, "无效的 PID", 500)
-		return
-	}
-
 	// 记录最终资源数据
-	pss, cst := ReadProcStats(pid)
+	pss, cst := ReadProcStats(metadata.PGID)
 	if pss > 0 || cst > 0 {
 		s.store.UpdateRunResources(id, pss, cst, ResourceSupported(), "ok")
 	}
 
 	// 调用统一的 StopRun，3 秒宽限期
-	result := StopRun(pid, 3, false)
+	result := StopManagedProcess(run.RunDir, metadata, 3, false, "user")
 
 	if result.AlreadyDead {
-		s.store.UpdateRunStatus(id, "failed", -1, "", 0)
+		_, _ = ReconcileRun(s.store, run)
 	}
 
 	if !result.OK {
 		httpError(w, result.Msg, 500)
 		return
 	}
+	if err := CompleteUserStop(s.store, run, result); err != nil {
+		httpError(w, err.Error(), 500)
+		return
+	}
 
-	jsonResponse(w, map[string]any{"ok": true, "killed": result.PID, "msg": result.Msg})
+	jsonResponse(w, map[string]any{"ok": true, "killed": result.PID, "pgid": result.PGID, "msg": result.Msg, "signal": result.Signal, "escalated": result.Escalated, "group_gone": result.GroupGone})
 }
 
 func (s *WebServer) apiDeleteRun(w http.ResponseWriter, r *http.Request) {
@@ -805,46 +819,20 @@ func (s *WebServer) healthCheckLoop(interval time.Duration) {
 }
 
 func (s *WebServer) checkRunningTasks() {
-	runs, err := s.store.ListRuns(200, "", "running", "", "", "", "", false, "", "")
+	results, err := ReconcileRunningRuns(s.store, 200)
 	if err != nil {
 		internal.Log().Error("health_check_query_failed", "error", err.Error())
 		return
 	}
 
-	if len(runs) == 0 {
+	if len(results) == 0 {
 		return
 	}
-
-	internal.Log().Info("health_check", "running_count", len(runs))
-
-	for _, run := range runs {
-		pid, ok := s.readPID(run.RunDir)
-		if !ok {
-			s.markRunFailedNow(run)
-			internal.Log().Warn("health_check_zombie_no_pid", "run_id", run.ID)
-			continue
+	internal.Log().Info("health_check", "running_count", len(results))
+	for _, result := range results {
+		if result.Changed {
+			internal.Log().Warn("health_check_reconciled", "run_id", result.RunID, "reason", result.Reason)
 		}
-
-		if err := syscall.Kill(pid, 0); err != nil {
-			s.markRunFailedNow(run)
-			internal.Log().Warn("health_check_zombie_process_dead", "run_id", run.ID, "pid", pid)
-		}
-	}
-}
-
-func (s *WebServer) markRunFailedNow(run *internal.Run) {
-	endedAt := time.Now().UTC()
-	durationMs := run.DurationMs
-	if run.StartedAt != "" {
-		if started, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
-			durationMs = endedAt.Sub(started).Milliseconds()
-			if durationMs < 0 {
-				durationMs = 0
-			}
-		}
-	}
-	if err := s.store.UpdateRunStatus(run.ID, "failed", -1, endedAt.Format(time.RFC3339), durationMs); err != nil {
-		internal.Log().Error("health_check_update_failed", "run_id", run.ID, "error", err.Error())
 	}
 }
 
@@ -946,13 +934,9 @@ func (s *WebServer) buildRunProcessSummary(run *internal.Run) RunProcessSummary 
 }
 
 func (s *WebServer) readPID(runDir string) (int, bool) {
-	data, err := os.ReadFile(filepath.Join(runDir, ".pid"))
+	metadata, err := ReadProcessMetadata(runDir)
 	if err != nil {
 		return 0, false
 	}
-	var pid int
-	if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); n == 1 && pid > 0 {
-		return pid, true
-	}
-	return 0, false
+	return metadata.PID, metadata.PID > 0
 }

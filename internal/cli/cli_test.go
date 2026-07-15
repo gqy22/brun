@@ -568,6 +568,16 @@ func TestListCmdFiltersDisplayStatus(t *testing.T) {
 	}
 }
 
+func TestParseListStatusFilterAcceptsTimedOut(t *testing.T) {
+	base, withWarnings, err := parseListStatusFilter("timed_out_with_warnings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "timed_out" || !withWarnings {
+		t.Fatalf("base=%q withWarnings=%t", base, withWarnings)
+	}
+}
+
 func TestCleanCmdAcceptsAbsoluteDate(t *testing.T) {
 	home := fastTempDir(t)
 	t.Setenv("BRUN_HOME", home)

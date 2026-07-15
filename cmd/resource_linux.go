@@ -44,13 +44,14 @@ type procStat struct {
 }
 
 type procStatFull struct {
-	pid        int
-	ppid       int
-	pgrp       int
-	state      string
-	comm       string
-	utimeTicks uint64
-	stimeTicks uint64
+	pid            int
+	ppid           int
+	pgrp           int
+	state          string
+	comm           string
+	utimeTicks     uint64
+	stimeTicks     uint64
+	startTimeTicks uint64
 }
 
 type processTreeNode struct {
@@ -503,14 +504,19 @@ func parseProcStatFull(data []byte) (procStatFull, error) {
 		return procStatFull{}, err
 	}
 
+	var startTime uint64
+	if len(fields) > 19 {
+		startTime, _ = strconv.ParseUint(fields[19], 10, 64)
+	}
 	return procStatFull{
-		pid:        pid,
-		ppid:       ppid,
-		pgrp:       pgrp,
-		state:      state,
-		comm:       comm,
-		utimeTicks: utime,
-		stimeTicks: stime,
+		pid:            pid,
+		ppid:           ppid,
+		pgrp:           pgrp,
+		state:          state,
+		comm:           comm,
+		utimeTicks:     utime,
+		stimeTicks:     stime,
+		startTimeTicks: startTime,
 	}, nil
 }
 
@@ -545,56 +551,88 @@ func KillProcessGroup(pgid int, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
-// StopResult 统一终止操作的结果
-type StopResult struct {
-	OK       bool   `json:"ok"`
-	PID      int    `json:"pid,omitempty"`
-	Msg      string `json:"msg,omitempty"`
-	AlreadyDead bool `json:"already_dead,omitempty"`
-}
-
-// StopRun 终止指定 run 的进程。Web apiKill 和 CLI stopCmd 共用此函数。
-// graceSeconds: SIGTERM 后等待优雅退出的秒数，0 表示不发信号直接返回。
-func StopRun(pid int, graceSeconds int, force bool) StopResult {
-	// 探活
-	if err := syscall.Kill(pid, 0); err != nil {
-		if err == syscall.ESRCH {
-			return StopResult{OK: true, PID: pid, Msg: fmt.Sprintf("进程 %d 已不存在", pid), AlreadyDead: true}
-		}
-		return StopResult{OK: false, PID: pid, Msg: fmt.Sprintf("无法访问进程 %d: %v", pid, err)}
+// StopManagedProcess verifies the recorded identity before signalling and only
+// reports success after the complete process group has disappeared.
+func StopManagedProcess(runDir string, metadata ProcessMetadata, graceSeconds int, force bool, reason string) StopResult {
+	result := StopResult{PID: metadata.PID, PGID: metadata.PGID}
+	inspection := InspectProcess(metadata)
+	if !inspection.GroupAlive {
+		result.OK, result.GroupGone, result.AlreadyDead = true, true, true
+		result.Msg = fmt.Sprintf("进程组 %d 已不存在", metadata.PGID)
+		return result
+	}
+	if inspection.RootExists && !inspection.IdentityMatch {
+		result.IdentityMismatch = true
+		result.Msg = fmt.Sprintf("PID %d 已被其他进程复用，拒绝发送信号", metadata.PID)
+		return result
 	}
 
-	// 记录最终资源（调用方决定是否写入 DB）
-	_, _ = ReadProcStats(pid)
-
-	// 发送 SIGTERM
-	if err := KillProcessGroup(pid, syscall.SIGTERM); err != nil {
-		syscall.Kill(pid, syscall.SIGTERM)
+	signalName := "SIGTERM"
+	signalValue := syscall.SIGTERM
+	if force {
+		signalName, signalValue = "SIGKILL", syscall.SIGKILL
+	}
+	if err := WriteTerminationRecord(runDir, TerminationRecord{Reason: reason, Signal: signalName}); err != nil {
+		result.Msg = fmt.Sprintf("写入终止审计记录失败，未发送信号: %v", err)
+		return result
+	}
+	result.Signal = signalName
+	if err := KillProcessGroup(metadata.PGID, signalValue); err != nil {
+		if !inspection.IdentityMatch || syscall.Kill(metadata.PID, signalValue) != nil {
+			result.Msg = fmt.Sprintf("向进程组 %d 发送 %s 失败: %v", metadata.PGID, signalName, err)
+			return result
+		}
 	}
 
 	if force {
-		time.Sleep(100 * time.Millisecond)
-		KillProcessGroup(pid, syscall.SIGKILL)
-		return StopResult{OK: true, PID: pid, Msg: "已强制终止 (SIGKILL)"}
-	}
-
-	if graceSeconds <= 0 {
-		return StopResult{OK: true, PID: pid, Msg: "已发送终止信号"}
-	}
-
-	// 等待优雅退出
-	deadline := time.After(time.Duration(graceSeconds) * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline:
-			KillProcessGroup(pid, syscall.SIGKILL)
-			return StopResult{OK: true, PID: pid, Msg: "未在宽限期内退出，已强制终止 (SIGKILL)"}
-		case <-ticker.C:
-			if syscall.Kill(pid, 0) != nil {
-				return StopResult{OK: true, PID: pid, Msg: "已终止 (SIGTERM)"}
-			}
+		if waitProcessGroupExit(metadata.PGID, 2*time.Second) {
+			result.OK, result.GroupGone = true, true
+			result.Msg = "已强制终止并确认进程组退出 (SIGKILL)"
+			return result
 		}
+		result.Msg = fmt.Sprintf("已发送 SIGKILL，但进程组 %d 仍存在", metadata.PGID)
+		return result
 	}
+	if graceSeconds <= 0 {
+		result.OK = true
+		result.Msg = "已发送终止信号 (SIGTERM)"
+		return result
+	}
+	if waitProcessGroupExit(metadata.PGID, time.Duration(graceSeconds)*time.Second) {
+		result.OK, result.GroupGone = true, true
+		result.Msg = "已终止并确认进程组退出 (SIGTERM)"
+		return result
+	}
+
+	result.Escalated, result.Signal = true, "SIGKILL"
+	_ = WriteTerminationRecord(runDir, TerminationRecord{Reason: reason, Signal: "SIGKILL", Escalated: true})
+	if err := KillProcessGroup(metadata.PGID, syscall.SIGKILL); err != nil && processGroupAlive(metadata.PGID) {
+		result.Msg = fmt.Sprintf("SIGTERM 超时，发送 SIGKILL 失败: %v", err)
+		return result
+	}
+	if waitProcessGroupExit(metadata.PGID, 2*time.Second) {
+		result.OK, result.GroupGone = true, true
+		result.Msg = "宽限期后强制终止，并确认进程组退出 (SIGKILL)"
+		return result
+	}
+	result.Msg = fmt.Sprintf("已升级到 SIGKILL，但进程组 %d 仍存在", metadata.PGID)
+	return result
+}
+
+func waitProcessGroupExit(pgid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processGroupAlive(pgid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// StopRun is retained for legacy integer-only callers.
+func StopRun(pid int, graceSeconds int, force bool) StopResult {
+	return StopManagedProcess("", ProcessMetadata{PID: pid, PGID: pid, Legacy: true}, graceSeconds, force, "user")
 }

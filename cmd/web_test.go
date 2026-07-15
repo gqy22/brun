@@ -296,7 +296,7 @@ func TestApiListRuns_DisplayStatusFilter(t *testing.T) {
 	_ = run
 }
 
-func TestApiListRuns_DisplayStatusFilter_FailedAndCancelled(t *testing.T) {
+func TestApiListRuns_DisplayStatusFilterTerminalWarnings(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	// 准备三种状态的 run，每种都带一个 warning，让 DisplayStatus 切到 _with_warnings 变体
@@ -306,6 +306,10 @@ func TestApiListRuns_DisplayStatusFilter_FailedAndCancelled(t *testing.T) {
 	}
 	cancelled := &internal.Run{ID: "cw1", Status: "cancelled", StartedAt: "2026-06-11T00:00:01Z", RunDir: "/t", CWD: "/t", DiagWarningCount: 2}
 	if err := srv.store.CreateRun(cancelled); err != nil {
+		t.Fatal(err)
+	}
+	timedOut := &internal.Run{ID: "tw1", Status: "timed_out", StartedAt: "2026-06-11T00:00:01Z", RunDir: "/t", CWD: "/t", DiagWarningCount: 1}
+	if err := srv.store.CreateRun(timedOut); err != nil {
 		t.Fatal(err)
 	}
 	plain := &internal.Run{ID: "plain1", Status: "failed", StartedAt: "2026-06-11T00:00:02Z", RunDir: "/t", CWD: "/t"}
@@ -321,6 +325,7 @@ func TestApiListRuns_DisplayStatusFilter_FailedAndCancelled(t *testing.T) {
 	}{
 		{"failed_with_warnings", "?display_status=failed_with_warnings", "fw1", "failed_with_warnings"},
 		{"cancelled_with_warnings", "?display_status=cancelled_with_warnings", "cw1", "cancelled_with_warnings"},
+		{"timed_out_with_warnings", "?display_status=timed_out_with_warnings", "tw1", "timed_out_with_warnings"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

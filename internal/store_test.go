@@ -86,10 +86,10 @@ func TestStore_CreateRun(t *testing.T) {
 
 func TestRun_DisplayStatus(t *testing.T) {
 	cases := []struct {
-		name           string
-		status         string
-		warningCount   int
-		want           string
+		name         string
+		status       string
+		warningCount int
+		want         string
 	}{
 		{"success no warning", "success", 0, "success"},
 		{"success with warning", "success", 2, "success_with_warnings"},
@@ -97,6 +97,8 @@ func TestRun_DisplayStatus(t *testing.T) {
 		{"failed with warning", "failed", 1, "failed_with_warnings"},
 		{"cancelled no warning", "cancelled", 0, "cancelled"},
 		{"cancelled with warning", "cancelled", 3, "cancelled_with_warnings"},
+		{"timed out", "timed_out", 0, "timed_out"},
+		{"timed out with warning", "timed_out", 1, "timed_out_with_warnings"},
 		{"running", "running", 0, "running"},
 		{"running with warning", "running", 1, "running"},
 	}

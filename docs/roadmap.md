@@ -108,11 +108,13 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成：资源采样能力已显式化。`brun run` 会记录 `resource_supported` 和 `resource_status=ok|unavailable|unsupported`，并写入 SQLite、`metadata.yaml`、`show --json` 和 Web detail，避免把“不支持采样”显示成真实 0。
 
-已完成：运行控制入口已统一为 `brun stop <run_id>`。终止采用两阶段：先发 SIGTERM，等待最多 3 秒宽限期，进程仍未退出再发 SIGKILL；支持 `--force` 跳过宽限期，支持 `--latest` 选择器，作用于整个进程组（含子进程）。终止路径已收敛到 `cmd.StopRun()`，CLI `brun stop` 和 Web kill 共享同一条代码路径，Web 侧改为等待进程真正退出再返回。终止后状态自动置为 `failed`，并保留最近一次资源采样。
+已完成：运行控制入口已统一为 `brun stop <run_id>`。终止采用两阶段：先发 SIGTERM，等待最多 3 秒宽限期，进程仍未退出再发 SIGKILL；支持 `--force` 跳过宽限期，支持 `--latest` 选择器，作用于整个进程组（含子进程）。CLI stop、Web kill 和前台信号处理共享 `StopManagedProcess()`：信号发送前校验 PID、PGID 与 Linux `/proc/<pid>/stat` 启动时钟，PID 被复用时拒绝操作；返回成功前确认整个 PGID 已退出。用户停止写为 `cancelled`，运行超时写为 `timed_out`，失败仍写为 `failed`；信号、升级到 SIGKILL 与进程组确认结果保存在 `.termination.json` 和诊断事件中。
+
+已完成：`.pid` 从单个整数升级为原子写入的 JSON 进程身份记录，包含版本、PID、PGID、启动时钟和创建时间；读取端继续兼容历史整数 `.pid`。`brun list`、`brun show`、Web 查询和 Web 周期检查共用 reconciler：发现进程身份不一致、进程组消失或超过 2 分钟仍没有有效进程元数据时，将失联的 `running` 修复为 `failed`，同时补齐结束时间、duration、metadata.yaml 和诊断事件。因此 CLI-only 使用不再依赖启动 Web 才能清理 stale running。
 
 已完成：hostname/username 采集状态已显式化。`brun run` 启动时尝试 `os.Hostname()` 和 `USER` 环境变量：成功写入 `hostname_status=ok`/`username_status=ok`，失败或为空时写入 `unavailable`。字段已并入 SQLite schema（version 6 迁移加 `hostname_status` / `username_status` 两列）、`metadata.yaml`、`brun show --json` / `brun list --json` 输出和 Web detail。`brun repair` 从 `metadata.yaml` 重建索引时也会带回这两个状态。
 
-已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` 已落地。`Run.DisplayStatus()` 在 `DiagWarningCount>0` 且基础状态为 `success/failed/cancelled` 时分别返回三种 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选下拉新增 `failed_with_warnings` 和 `cancelled_with_warnings` 选项，行色与徽标用 `*_with_warnings` CSS 变体高亮。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。
+已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` / `timed_out_with_warnings` 已落地。`Run.DisplayStatus()` 在终态存在 warning 时返回对应 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选和颜色覆盖四种终态。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。
 
 已完成：schema 升至 v7 并加入 `hostname_status` / `username_status` 的迁移回填。v5 → v7 升级时，对已存在的 `runs` 行执行：`hostname`/`username` 非空则回填 `ok`，否则回填 `unavailable`；`WHERE *_status IS NULL` 限定保证幂等，老库升级一次即可，不再二次改写。
 

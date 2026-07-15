@@ -12,18 +12,19 @@ import (
 	"time"
 )
 
-const second = time.Second
-
 type RunResult struct {
-	ExitCode          int
-	Status            string
-	DurationMs        int64
-	StartedAt         string
-	EndedAt           string
-	PeakRSSKB         int64
-	CPUTimeMs         int64
-	ResourceSupported bool
-	ResourceStatus    string
+	ExitCode             int
+	Status               string
+	DurationMs           int64
+	StartedAt            string
+	EndedAt              string
+	PeakRSSKB            int64
+	CPUTimeMs            int64
+	ResourceSupported    bool
+	ResourceStatus       string
+	TerminationReason    string
+	TerminationSignal    string
+	TerminationEscalated bool
 }
 
 type RunRecord struct {
@@ -181,20 +182,27 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 			ResourceStatus:    resourceStatus(ResourceUsage{}),
 		}
 	}
-	if timeout > 0 {
-		timer := time.AfterFunc(timeout, func() {
-			if cmd.Process != nil {
-				KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
-			}
-		})
-		defer timer.Stop()
+	runDir := filepath.Dir(stdoutPath)
+	_ = os.Remove(filepath.Join(runDir, TerminationRecordFile))
+	metadata, metadataErr := NewProcessMetadata(cmd.Process.Pid, cmd.Process.Pid)
+	if metadataErr == nil {
+		metadataErr = WriteProcessMetadata(runDir, metadata)
+	}
+	if metadataErr != nil {
+		_ = KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		return RunResult{
+			ExitCode:          1,
+			Status:            "failed",
+			DurationMs:        time.Since(start).Milliseconds(),
+			StartedAt:         start.UTC().Format(time.RFC3339),
+			EndedAt:           time.Now().UTC().Format(time.RFC3339),
+			ResourceSupported: ResourceSupported(),
+			ResourceStatus:    "unavailable",
+		}
 	}
 
-	sampler := StartProcessGroupSampler(cmd.Process.Pid, 500*time.Millisecond)
-
-	// 保存 PID 到 .pid 文件（供 Web kill 接口使用）
-	pidFile := filepath.Join(filepath.Dir(stdoutPath), ".pid")
-	os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
+	sampler := StartProcessGroupSampler(metadata.PGID, 500*time.Millisecond)
 
 	// 等待命令完成或收到信号
 	done := make(chan error, 1)
@@ -202,57 +210,81 @@ func ExecuteCommandWithSignal(args []string, cwd, stdoutPath, stderrPath string,
 		done <- cmd.Wait()
 	}()
 
-	interrupted := false
+	var timeoutChannel <-chan time.Time
+	var timer *time.Timer
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
+		timeoutChannel = timer.C
+		defer timer.Stop()
+	}
+	localReason := ""
+	var controlResult StopResult
 	select {
 	case err = <-done:
-		// 正常完成
 	case <-sigCh:
-		interrupted = true
+		localReason = "signal"
 		fmt.Printf("\n[信号] 收到中断信号，正在优雅停止...\n")
-		// 收到信号，优雅终止子进程组
-		if cmd.Process.Pid > 0 {
-			KillProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
-			select {
-			case waitErr := <-done:
-				err = waitErr
-			case <-time.After(2 * second):
-				KillProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
-				err = <-done
-			}
+		controlResult = StopManagedProcess(runDir, metadata, 2, false, localReason)
+		if !controlResult.OK {
+			_ = KillProcessGroup(metadata.PGID, syscall.SIGKILL)
 		}
-		if err == nil {
-			err = fmt.Errorf("被信号中断")
+		err = <-done
+	case <-timeoutChannel:
+		localReason = "timeout"
+		controlResult = StopManagedProcess(runDir, metadata, 0, true, localReason)
+		if !controlResult.OK {
+			_ = KillProcessGroup(metadata.PGID, syscall.SIGKILL)
 		}
+		err = <-done
 	}
 
+	termination, _ := ReadTerminationRecord(runDir)
+	if termination.Reason == "" {
+		termination.Reason = localReason
+	}
+	if controlResult.Signal != "" {
+		termination.Signal = controlResult.Signal
+		termination.Escalated = controlResult.Escalated
+	}
 	exitCode := 0
-	if err != nil {
-		if interrupted {
-			exitCode = 130
-		} else if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 130 // SIGINT 的标准退出码
+	status := "success"
+	switch termination.Reason {
+	case "user", "signal":
+		status = "cancelled"
+		exitCode = 130
+	case "timeout":
+		status = "timed_out"
+		exitCode = 124
+	default:
+		if err != nil {
+			status = "failed"
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
 		}
+	}
+	if status == "cancelled" && exitCode == 0 {
+		exitCode = 130
 	}
 
 	duration := time.Since(start)
-	status := "success"
-	if exitCode != 0 {
-		status = "failed"
-	}
 	usage := sampler.Stop()
 
 	return RunResult{
-		ExitCode:          exitCode,
-		Status:            status,
-		DurationMs:        duration.Milliseconds(),
-		StartedAt:         start.UTC().Format(time.RFC3339),
-		EndedAt:           time.Now().UTC().Format(time.RFC3339),
-		PeakRSSKB:         usage.PeakRSSKB,
-		CPUTimeMs:         usage.CPUTimeMs,
-		ResourceSupported: ResourceSupported(),
-		ResourceStatus:    resourceStatus(usage),
+		ExitCode:             exitCode,
+		Status:               status,
+		DurationMs:           duration.Milliseconds(),
+		StartedAt:            start.UTC().Format(time.RFC3339),
+		EndedAt:              time.Now().UTC().Format(time.RFC3339),
+		PeakRSSKB:            usage.PeakRSSKB,
+		CPUTimeMs:            usage.CPUTimeMs,
+		ResourceSupported:    ResourceSupported(),
+		ResourceStatus:       resourceStatus(usage),
+		TerminationReason:    termination.Reason,
+		TerminationSignal:    termination.Signal,
+		TerminationEscalated: termination.Escalated,
 	}
 }
 

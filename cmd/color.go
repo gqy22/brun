@@ -70,6 +70,8 @@ func StatusColor(status string) string {
 		styledBase = Yellow(base)
 	case "cancelled":
 		styledBase = Magenta(base)
+	case "timed_out":
+		styledBase = Red(base)
 	default:
 		styledBase = Cyan(base)
 	}

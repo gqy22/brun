@@ -42,6 +42,6 @@ output: |
   | COMMAND | 执行的命令（截断显示） |
   | CWD | 命令的运行目录，显示在命令下方 |
 
-  状态值包含基础状态 (running/success/failed/cancelled) 及其 warnings 变体，
+  状态值包含基础状态 (running/success/failed/cancelled/timed_out) 及其 warnings 变体，
   如 success_with_warnings 表示命令成功但诊断链路存在 warning。
 ---

@@ -273,6 +273,15 @@ func executeRun(args []string, name, project, note string, tags []string,
 	defer signal.Stop(sigCh)
 
 	result := cmd.ExecuteCommandWithSignal(args, cwd, stdoutPath, stderrPath, timeout, sigCh)
+	if result.TerminationReason != "" {
+		detail := fmt.Sprintf("reason=%s signal=%s escalated=%t", result.TerminationReason, result.TerminationSignal, result.TerminationEscalated)
+		switch result.TerminationReason {
+		case "timeout":
+			diagnostics.Warning("run_timed_out", "任务达到超时限制", detail)
+		case "signal":
+			diagnostics.Info("run_cancelled", "任务收到终止信号", detail)
+		}
+	}
 
 	// 11. after 快照 + diff
 	if !noFsDiff {
@@ -360,7 +369,7 @@ func executeRun(args []string, name, project, note string, tags []string,
 	// 16. 打印摘要
 	fmt.Printf("\n命令执行完成: %s，耗时 %s\n", status, cmd.DurationString(result.DurationMs))
 	internal.Log().Info("run_finished", "run_id", runID, "status", status, "exit_code", result.ExitCode, "duration", cmd.DurationString(result.DurationMs))
-	if status == "failed" {
+	if status == "failed" || status == "timed_out" {
 		if errData, err := os.ReadFile(stderrPath); err == nil {
 			if lines := strings.Split(strings.TrimRight(string(errData), "\r\n"), "\n"); len(lines) > 0 {
 				lastN := lines

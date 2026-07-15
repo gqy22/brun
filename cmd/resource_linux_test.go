@@ -33,6 +33,23 @@ func TestParseProcStatHandlesCommandNamesWithSpacesAndParens(t *testing.T) {
 	}
 }
 
+func TestParseProcStatReadsStartTime(t *testing.T) {
+	fields := []string{"S", "1", "777"}
+	for len(fields) <= 19 {
+		fields = append(fields, "0")
+	}
+	fields[11] = "41"
+	fields[12] = "9"
+	fields[19] = "123456"
+	got, err := parseProcStatFull([]byte("123 (worker) " + strings.Join(fields, " ") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.startTimeTicks != 123456 {
+		t.Fatalf("startTimeTicks = %d", got.startTimeTicks)
+	}
+}
+
 func TestSampleProcessGroupFromProcAggregatesMatchingProcessGroup(t *testing.T) {
 	root := t.TempDir()
 	writeFakeProc(t, root, 101, makeProcStat(101, "bash script", 777, 30, 10), "VmRSS:\t1200 kB\n", "")

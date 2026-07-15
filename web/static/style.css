@@ -376,6 +376,8 @@ body {
 .row-status-failed_with_warnings td:first-child::before { background: var(--warning); }
 .row-status-cancelled td:first-child::before { background: #94a3b8; }
 .row-status-cancelled_with_warnings td:first-child::before { background: var(--warning); }
+.row-status-timed_out td:first-child::before { background: #f97316; }
+.row-status-timed_out_with_warnings td:first-child::before { background: var(--warning); }
 
 /* 行入场动画 */
 @keyframes rowFadeIn {
@@ -416,6 +418,10 @@ body {
 .badge-cancelled::before { background: #94a3b8; }
 .badge-cancelled_with_warnings { background: var(--warning-bg); color: #475569; border: 1px solid #94a3b8; }
 .badge-cancelled_with_warnings::before { background: var(--warning); }
+.badge-timed_out { background: rgba(249,115,22,0.14); color: #c2410c; }
+.badge-timed_out::before { background: #f97316; }
+.badge-timed_out_with_warnings { background: var(--warning-bg); color: #c2410c; border: 1px solid #f97316; }
+.badge-timed_out_with_warnings::before { background: var(--warning); }
 .badge-running { background: var(--running-bg); color: #0e7490; }
 .badge-running::before { background: var(--running); animation: dotPulse 1.5s infinite; }
 .badge-danger { background: rgba(239,68,68,0.12); color: #ef4444; }
@@ -1627,6 +1633,8 @@ code {
   .run-card.row-status-failed_with_warnings::before { background: var(--warning); }
   .run-card.row-status-cancelled::before { background: #94a3b8; }
   .run-card.row-status-cancelled_with_warnings::before { background: var(--warning); }
+  .run-card.row-status-timed_out::before { background: #f97316; }
+  .run-card.row-status-timed_out_with_warnings::before { background: var(--warning); }
   .run-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow);

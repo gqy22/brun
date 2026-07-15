@@ -58,6 +58,9 @@ func TestSemanticColors(t *testing.T) {
 	if got := stripANSI(StatusColor("cancelled")); got != "cancelled" {
 		t.Fatalf("StatusColor(cancelled) text = %q", got)
 	}
+	if got := StatusColor("timed_out"); got != Red("timed_out") {
+		t.Fatalf("StatusColor(timed_out) = %q, want red", got)
+	}
 }
 
 func TestSemanticColorsDisabled(t *testing.T) {

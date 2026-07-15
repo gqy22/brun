@@ -30,11 +30,14 @@ func listCmd() *cobra.Command {
 			if limit <= 0 {
 				return cliError("invalid_limit", "--limit 必须大于 0", "例如 brun list --limit 20", nil)
 			}
-			store, err := openStoreReadOnly()
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
+			if _, err := cmd.ReconcileRunningRuns(store, 200); err != nil {
+				return err
+			}
 
 			sinceVal, untilVal := since, until
 			if since != "" {
@@ -91,7 +94,7 @@ func listCmd() *cobra.Command {
 		},
 	}
 	cc.Flags().StringVarP(&project, "project", "p", "", "按项目过滤")
-	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (running/success/failed/cancelled 及 *_with_warnings)")
+	cc.Flags().StringVarP(&status, "status", "S", "", "按状态过滤 (running/success/failed/cancelled/timed_out 及 *_with_warnings)")
 	cc.Flags().StringVarP(&tag, "tag", "t", "", "按 tag 过滤")
 	cc.Flags().StringVarP(&search, "search", "s", "", "在命令/名称中搜索关键词")
 	cc.Flags().StringVar(&since, "since", "", "显示此时间之后的记录 (YYYY-MM-DD, RFC3339, today, Nh/Nd/Nw)")
@@ -122,6 +125,15 @@ func showCmd() *cobra.Command {
 			r, err := selectedRun(store, args, latest)
 			if err != nil {
 				return runLookupError(err)
+			}
+			if r.Status == "running" {
+				if _, err := cmd.ReconcileRun(store, r); err != nil {
+					return err
+				}
+				r, err = store.GetRun(r.ID)
+				if err != nil {
+					return err
+				}
 			}
 
 			tags, _ := store.GetTags(r.ID)
@@ -879,14 +891,14 @@ func parseListStatusFilter(status string) (string, bool, error) {
 	withWarnings := strings.HasSuffix(status, "_with_warnings")
 	base := strings.TrimSuffix(status, "_with_warnings")
 	switch base {
-	case "running", "success", "failed", "cancelled":
+	case "running", "success", "failed", "cancelled", "timed_out":
 		if withWarnings && base == "running" {
 			return "", false, cliError("invalid_status", "running 没有 with_warnings 变体", "使用 --status running", nil)
 		}
 		return base, withWarnings, nil
 	default:
 		return "", false, cliError("invalid_status", "未知状态: "+status,
-			"支持 running、success、failed、cancelled 及 success/failed/cancelled_with_warnings", nil)
+			"支持 running、success、failed、cancelled、timed_out 及对应的 with_warnings 变体", nil)
 	}
 }
 

@@ -329,12 +329,12 @@
 - 影响：智能体可以根据稳定错误码决定修参数、查 run 列表、修配置、检查权限或终止流程。
 - 建议：继续把数据库损坏、索引缺失、日志文件缺失、Web 端口占用等错误迁入同一格式。
 
-### success_with_warnings / failed_with_warnings / cancelled_with_warnings 展示状态
+### success_with_warnings / failed_with_warnings / cancelled_with_warnings / timed_out_with_warnings 展示状态
 
 - 类型：`resolved`
 - 位置：`internal/store.go`（`Run.DisplayStatus()`）、`internal/cli/query.go`、`cmd/query.go`、`cmd/web.go`
-- 当前行为：`Run.DisplayStatus()` 在 `DiagWarningCount>0` 且基础状态为 `success/failed/cancelled` 时分别返回 `success_with_warnings`、`failed_with_warnings`、`cancelled_with_warnings`，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；`/api/runs?display_status=...` 把 `_with_warnings` 变体翻译成 `status=...` + `diag_warning_count>0` 的 DB 过滤。`status` 字段保持原值不变，agent 工具按 `status` 过滤不会被打乱。
-- 影响：智能体和前端可以在不读取诊断详情的前提下，快速区分"真成功/真失败/真取消"和"收尾但记录链路有 warning"；Web 状态筛选下拉新增 `failed_with_warnings` 和 `cancelled_with_warnings` 选项，列表行色与徽标用 `*_with_warnings` CSS 变体高亮。
+- 当前行为：`Run.DisplayStatus()` 在 `DiagWarningCount>0` 且基础状态为 `success/failed/cancelled/timed_out` 时返回对应的 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；`/api/runs?display_status=...` 把 `_with_warnings` 变体翻译成 `status=...` + `diag_warning_count>0` 的 DB 过滤。`status` 字段保持原值不变，agent 工具按 `status` 过滤不会被打乱。
+- 影响：智能体和前端可以在不读取诊断详情的前提下，快速区分成功、失败、取消、超时及其带 warning 的收尾状态；Web 状态筛选、列表行色与徽标覆盖完整状态集合。
 - 建议：保持 `status` 与 `display_status` 双字段约定；同族新变体仍集中在 `DisplayStatus()` 扩展，避免分散到调用方。
 
 ## 建议清理顺序

@@ -48,34 +48,32 @@ func KillProcessGroup(pgid int, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
-// StopResult 统一终止操作的结果
-type StopResult struct {
-	OK          bool   `json:"ok"`
-	PID         int    `json:"pid,omitempty"`
-	Msg         string `json:"msg,omitempty"`
-	AlreadyDead bool   `json:"already_dead,omitempty"`
+func StopRun(pid int, graceSeconds int, force bool) StopResult {
+	return StopManagedProcess("", ProcessMetadata{PID: pid, PGID: pid, Legacy: true}, graceSeconds, force, "user")
 }
 
-// StopRun 终止指定 run 的进程。Web apiKill 和 CLI stopCmd 共用此函数。
-// graceSeconds: SIGTERM 后等待优雅退出的秒数，0 表示不发信号直接返回。
-func StopRun(pid int, graceSeconds int, force bool) StopResult {
+func StopManagedProcess(runDir string, metadata ProcessMetadata, graceSeconds int, force bool, reason string) StopResult {
+	pid := metadata.PID
 	if err := syscall.Kill(pid, 0); err != nil {
 		if err == syscall.ESRCH {
-			return StopResult{OK: true, PID: pid, Msg: fmt.Sprintf("进程 %d 已不存在", pid), AlreadyDead: true}
+			return StopResult{OK: true, PID: pid, PGID: metadata.PGID, Msg: fmt.Sprintf("进程 %d 已不存在", pid), AlreadyDead: true, GroupGone: true}
 		}
-		return StopResult{OK: false, PID: pid, Msg: fmt.Sprintf("无法访问进程 %d: %v", pid, err)}
+		return StopResult{OK: false, PID: pid, PGID: metadata.PGID, Msg: fmt.Sprintf("无法访问进程 %d: %v", pid, err)}
 	}
 
 	ReadProcStats(pid)
+	if err := WriteTerminationRecord(runDir, TerminationRecord{Reason: reason, Signal: "SIGTERM"}); err != nil {
+		return StopResult{PID: pid, PGID: metadata.PGID, Msg: fmt.Sprintf("写入终止审计记录失败，未发送信号: %v", err)}
+	}
 
-	if err := KillProcessGroup(pid, syscall.SIGTERM); err != nil {
+	if err := KillProcessGroup(metadata.PGID, syscall.SIGTERM); err != nil {
 		syscall.Kill(pid, syscall.SIGTERM)
 	}
 
 	if force {
 		time.Sleep(100 * time.Millisecond)
-		KillProcessGroup(pid, syscall.SIGKILL)
-		return StopResult{OK: true, PID: pid, Msg: "已强制终止 (SIGKILL)"}
+		KillProcessGroup(metadata.PGID, syscall.SIGKILL)
+		return StopResult{OK: true, PID: pid, PGID: metadata.PGID, Msg: "已强制终止 (SIGKILL)", Signal: "SIGKILL"}
 	}
 
 	if graceSeconds <= 0 {
@@ -88,8 +86,8 @@ func StopRun(pid int, graceSeconds int, force bool) StopResult {
 	for {
 		select {
 		case <-deadline:
-			KillProcessGroup(pid, syscall.SIGKILL)
-			return StopResult{OK: true, PID: pid, Msg: "未在宽限期内退出，已强制终止 (SIGKILL)"}
+			KillProcessGroup(metadata.PGID, syscall.SIGKILL)
+			return StopResult{OK: true, PID: pid, PGID: metadata.PGID, Msg: "未在宽限期内退出，已强制终止 (SIGKILL)", Signal: "SIGKILL", Escalated: true}
 		case <-ticker.C:
 			if syscall.Kill(pid, 0) != nil {
 				return StopResult{OK: true, PID: pid, Msg: "已终止 (SIGTERM)"}
