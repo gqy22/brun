@@ -174,6 +174,11 @@ schema v9 增加 `resource_backend`、cgroup 路径、CPU user/system、`memory_
 可以使用 `--require-cgroup`，自动委派不可用时会在执行 payload 前失败，避免不同轮次使用
 不同的统计口径。
 
+嵌套 `brun run` 只复用当前进程独占的 delegated root。如果当前 cgroup 还包含外层 runner
+或其他进程，内层 Brun 会通过 systemd user manager 取得新的 transient scope，并确认 cgroup
+路径确实发生变化后再创建 payload；这样不需要移动或清理父 scope 中不属于内层 run 的进程，
+也不会违反 cgroup v2 的 no-internal-process 约束。
+
 ### 验收标准
 
 - [x] 普通用户通过 systemd 委派运行，不要求 root、sudo 或全局 cgroup 写权限。

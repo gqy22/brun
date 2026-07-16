@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +27,10 @@ type transientScopeStarter interface {
 func AcquireDelegation(runID string) (Environment, error) {
 	env := Detect()
 	if env.Delegated {
-		return env, nil
+		exclusive, err := delegatedRootExclusive(env.FullPath, os.Getpid())
+		if err == nil && exclusive {
+			return env, nil
+		}
 	}
 	if !env.Unified {
 		return env, fmt.Errorf("cgroup v2 unavailable: %s", env.Reason)
@@ -46,7 +51,30 @@ func AcquireDelegation(runID string) (Environment, error) {
 	if err := startDelegatedScope(ctx, conn, unit, os.Getpid()); err != nil {
 		return env, err
 	}
-	return waitForDelegation(ctx)
+	previousPath := ""
+	if env.Delegated {
+		previousPath = env.CurrentPath
+	}
+	return waitForDelegation(ctx, previousPath)
+}
+
+func delegatedRootExclusive(root string, pid int) (bool, error) {
+	if root == "" || pid <= 0 {
+		return false, fmt.Errorf("invalid delegated root %q or pid %d", root, pid)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "cgroup.procs"))
+	if err != nil {
+		return false, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 1 {
+		return false, nil
+	}
+	current, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return false, err
+	}
+	return current == pid, nil
 }
 
 func startDelegatedScope(ctx context.Context, manager transientScopeStarter, unit string, pid int) error {
@@ -74,11 +102,11 @@ func startDelegatedScope(ctx context.Context, manager transientScopeStarter, uni
 	}
 }
 
-func waitForDelegation(ctx context.Context) (Environment, error) {
+func waitForDelegation(ctx context.Context, previousPath string) (Environment, error) {
 	var env Environment
 	for {
 		env = Detect()
-		if env.Delegated {
+		if env.Delegated && (previousPath == "" || env.CurrentPath != previousPath) {
 			return env, nil
 		}
 		select {

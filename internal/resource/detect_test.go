@@ -35,6 +35,19 @@ func TestResolveAcquiresDelegationBeforeSelectingBackend(t *testing.T) {
 	}
 }
 
+func TestResolveRefreshesExistingDelegation(t *testing.T) {
+	initial := Environment{Unified: true, Delegated: true, CurrentPath: "/outer/payload"}
+	fresh := Environment{Unified: true, Delegated: true, CurrentPath: "/inner"}
+	called := false
+	got, err := resolve(ModeCgroup, "20260716-120000-abcdef", initial, true, func(string) (Environment, error) {
+		called = true
+		return fresh, nil
+	})
+	if err != nil || !called || got.Env.CurrentPath != "/inner" {
+		t.Fatalf("resolve nested = %+v, %v; called=%t", got, err, called)
+	}
+}
+
 func TestResolveAutoFallsBackWhenSystemdScopeFails(t *testing.T) {
 	initial := Environment{Unified: true, Reason: "not_delegated"}
 	got, err := resolve(ModeAuto, "20260716-120000-abcdef", initial, true, func(string) (Environment, error) {

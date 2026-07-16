@@ -4,10 +4,33 @@ package resource
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	systemddbus "github.com/coreos/go-systemd/v22/dbus"
 )
+
+func TestDelegatedRootExclusive(t *testing.T) {
+	root := t.TempDir()
+	pid := os.Getpid()
+	path := filepath.Join(root, "cgroup.procs")
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exclusive, err := delegatedRootExclusive(root, pid)
+	if err != nil || !exclusive {
+		t.Fatalf("exclusive = %t, err = %v", exclusive, err)
+	}
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n999999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exclusive, err = delegatedRootExclusive(root, pid)
+	if err != nil || exclusive {
+		t.Fatalf("shared exclusive = %t, err = %v", exclusive, err)
+	}
+}
 
 type fakeTransientScopeStarter struct {
 	unit       string
