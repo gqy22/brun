@@ -57,16 +57,19 @@ func (item *optionalInt) Set(value string) error {
 }
 
 func main() {
-	var tier, caseRoot, datasetRoot, cacheRoot, workingDir string
+	var tier, caseRoot, datasetRoot, cacheRoot, workingDir, brunBin string
 	var warmups, repeats optionalInt
+	var checkJobs int
 	matrices := make(matrixFlags)
 	flag.StringVar(&tier, "tier", "smoke", "数据层级")
 	flag.StringVar(&caseRoot, "cases", "guide/cases", "实验清单目录")
 	flag.StringVar(&datasetRoot, "datasets", "guide/datasets", "数据集清单目录")
 	flag.StringVar(&cacheRoot, "cache", "", "guide 数据缓存根目录")
 	flag.StringVar(&workingDir, "working-directory", "", "命令工作目录")
+	flag.StringVar(&brunBin, "brun", "", "brun 二进制路径（默认 BRUN_BIN 或 ./bin/brun）")
 	flag.Var(&warmups, "warmups", "覆盖清单中的预热次数")
 	flag.Var(&repeats, "repeats", "覆盖清单中的正式重复次数")
+	flag.IntVar(&checkJobs, "check-jobs", 0, "正确性检查的最大并发数；0 表示与 variant 数量相同")
 	flag.Var(matrices, "matrix", "覆盖参数矩阵，例如 threads=1,2,4（可重复）")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "用法: go run ./guide/cmd/bench [选项] <case-id>\n\n")
@@ -83,6 +86,12 @@ func main() {
 			cacheRoot = ".cache/guide-data"
 		}
 	}
+	if brunBin == "" {
+		brunBin = os.Getenv("BRUN_BIN")
+		if brunBin == "" {
+			brunBin = "./bin/brun"
+		}
+	}
 	options := runOptions{
 		CaseID:          flag.Arg(0),
 		Tier:            tier,
@@ -90,6 +99,8 @@ func main() {
 		DatasetRoot:     datasetRoot,
 		CacheRoot:       cacheRoot,
 		WorkingDir:      workingDir,
+		BrunBin:         brunBin,
+		CheckJobs:       checkJobs,
 		MatrixOverrides: matrices,
 	}
 	if warmups.set {

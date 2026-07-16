@@ -7,31 +7,46 @@ import (
 )
 
 type runRecord struct {
-	Variant       string
-	Phase         string
-	Repeat        int
-	Order         int
-	WallSeconds   float64
-	UserSeconds   float64
-	SystemSeconds float64
-	MaxRSSKB      int64
-	ExitCode      int
-	OutputBytes   int64
+	Variant           string
+	Phase             string
+	Repeat            int
+	Order             int
+	WallSeconds       float64
+	UserSeconds       float64
+	SystemSeconds     float64
+	MaxRSSKB          int64
+	ExitCode          int
+	OutputBytes       int64
+	BrunRunID         string
+	ResourceBackend   string
+	BrunDurationMs    int64
+	CgroupCPUUserMs   int64
+	CgroupCPUSystemMs int64
+	MemoryPeakBytes   int64
+	IOReadBytes       int64
+	IOWriteBytes      int64
+	OOMKillCount      int64
+	PIDsPeak          int64
 }
 
 type summaryRecord struct {
-	Variant           string
-	Runs              int
-	MeanWallSeconds   float64
-	MedianWallSeconds float64
-	MinWallSeconds    float64
-	MaxWallSeconds    float64
-	StddevWallSeconds float64
-	CVPercent         float64
-	MeanCPUSeconds    float64
-	MeanMaxRSSKB      float64
-	AverageCores      float64
-	SpeedupVsBaseline float64
+	Variant              string
+	Runs                 int
+	MeanWallSeconds      float64
+	MedianWallSeconds    float64
+	MinWallSeconds       float64
+	MaxWallSeconds       float64
+	StddevWallSeconds    float64
+	CVPercent            float64
+	MeanCPUSeconds       float64
+	MeanMaxRSSKB         float64
+	AverageCores         float64
+	SpeedupVsBaseline    float64
+	MeanCgroupCPUSeconds float64
+	MeanMemoryPeakBytes  float64
+	MeanIOReadBytes      float64
+	MeanIOWriteBytes     float64
+	CgroupAverageCores   float64
 }
 
 func summarizeRuns(runs []runRecord, baseline string) ([]summaryRecord, error) {
@@ -55,12 +70,16 @@ func summarizeRuns(runs []runRecord, baseline string) ([]summaryRecord, error) {
 	for _, variant := range variants {
 		items := grouped[variant]
 		walls := make([]float64, 0, len(items))
-		var wallSum, cpuSum, rssSum float64
+		var wallSum, cpuSum, rssSum, cgroupCPUSum, memoryPeakSum, ioReadSum, ioWriteSum float64
 		for _, item := range items {
 			walls = append(walls, item.WallSeconds)
 			wallSum += item.WallSeconds
 			cpuSum += item.UserSeconds + item.SystemSeconds
 			rssSum += float64(item.MaxRSSKB)
+			cgroupCPUSum += float64(item.CgroupCPUUserMs+item.CgroupCPUSystemMs) / 1000
+			memoryPeakSum += float64(item.MemoryPeakBytes)
+			ioReadSum += float64(item.IOReadBytes)
+			ioWriteSum += float64(item.IOWriteBytes)
 		}
 		sort.Float64s(walls)
 		mean := wallSum / float64(len(items))
@@ -75,22 +94,31 @@ func summarizeRuns(runs []runRecord, baseline string) ([]summaryRecord, error) {
 		if wallSum > 0 {
 			averageCores = cpuSum / wallSum
 		}
+		cgroupAverageCores := 0.0
+		if wallSum > 0 {
+			cgroupAverageCores = cgroupCPUSum / wallSum
+		}
 		cv := 0.0
 		if mean > 0 {
 			cv = stddev / mean * 100
 		}
 		summaries = append(summaries, summaryRecord{
-			Variant:           variant,
-			Runs:              len(items),
-			MeanWallSeconds:   mean,
-			MedianWallSeconds: median,
-			MinWallSeconds:    walls[0],
-			MaxWallSeconds:    walls[len(walls)-1],
-			StddevWallSeconds: stddev,
-			CVPercent:         cv,
-			MeanCPUSeconds:    cpuSum / float64(len(items)),
-			MeanMaxRSSKB:      rssSum / float64(len(items)),
-			AverageCores:      averageCores,
+			Variant:              variant,
+			Runs:                 len(items),
+			MeanWallSeconds:      mean,
+			MedianWallSeconds:    median,
+			MinWallSeconds:       walls[0],
+			MaxWallSeconds:       walls[len(walls)-1],
+			StddevWallSeconds:    stddev,
+			CVPercent:            cv,
+			MeanCPUSeconds:       cpuSum / float64(len(items)),
+			MeanMaxRSSKB:         rssSum / float64(len(items)),
+			AverageCores:         averageCores,
+			MeanCgroupCPUSeconds: cgroupCPUSum / float64(len(items)),
+			MeanMemoryPeakBytes:  memoryPeakSum / float64(len(items)),
+			MeanIOReadBytes:      ioReadSum / float64(len(items)),
+			MeanIOWriteBytes:     ioWriteSum / float64(len(items)),
+			CgroupAverageCores:   cgroupAverageCores,
 		})
 	}
 

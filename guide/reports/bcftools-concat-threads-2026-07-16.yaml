@@ -1,0 +1,18 @@
+schema: 1
+id: bcftools.concat-threads-2026-07-16
+guide: bcftools.concat-vs-merge
+case: bcftools.concat-benchmark
+date: "2026-07-16"
+summary: reports/bcftools-concat-threads-2026-07-16.md
+tools:
+  bcftools: "1.22.1"
+  htslib: "1.22.2"
+  brun: "v0.2.0-68-g7a34179-dirty"
+datasets:
+  - id: igsr-grch38-wgs-sites
+    role: medium-pilot
+    repeats: 1
+    warmups: 0
+    baseline_wall_seconds: 290.53
+    optimized_wall_seconds: 120.42
+    speedup: 2.41

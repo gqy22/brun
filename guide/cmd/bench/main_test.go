@@ -1,11 +1,67 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func TestRunChecksKeepsDeterministicOrderWithWorkers(t *testing.T) {
+	root := t.TempDir()
+	variants := []benchmarkVariant{{ID: "baseline"}, {ID: "second"}, {ID: "third"}}
+	outputs := make(map[string]string, len(variants))
+	for _, variant := range variants {
+		path := filepath.Join(root, variant.ID+".txt")
+		if err := os.WriteFile(path, []byte("same\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		outputs[variant.ID] = path
+	}
+	item := benchmarkCase{}
+	item.Benchmark.Baseline = "baseline"
+	item.Benchmark.Checks = []benchmarkCheck{{ID: "content", Command: []string{"cat", "{output}"}}}
+	records, err := runChecks(context.Background(), root, item, variants, nil, outputs, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records = %+v", records)
+	}
+	for index, variant := range variants {
+		if records[index].Variant != variant.ID || records[index].Status != "pass" {
+			t.Fatalf("records = %+v", records)
+		}
+	}
+}
+
+func TestResolveCheckJobsDefaultsToVariantCount(t *testing.T) {
+	got, err := resolveCheckJobs(0, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 6 {
+		t.Fatalf("jobs = %d, want 6", got)
+	}
+	got, err = resolveCheckJobs(2, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2 {
+		t.Fatalf("jobs = %d, want 2", got)
+	}
+	got, err = resolveCheckJobs(20, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 6 {
+		t.Fatalf("jobs = %d, want 6", got)
+	}
+	if _, err := resolveCheckJobs(-1, 6); err == nil {
+		t.Fatal("negative check jobs was accepted")
+	}
+}
 
 func TestLoadBenchmarkCaseParsesStrictSchema(t *testing.T) {
 	root := t.TempDir()
@@ -154,7 +210,7 @@ func TestExpandArgumentsUsesOnlyDeclaredPlaceholders(t *testing.T) {
 func TestSummarizeIgnoresWarmupsAndUsesMedian(t *testing.T) {
 	runs := []runRecord{
 		{Variant: "base", Phase: "warmup", WallSeconds: 100},
-		{Variant: "base", Phase: "measured", WallSeconds: 5, UserSeconds: 4, MaxRSSKB: 100},
+		{Variant: "base", Phase: "measured", WallSeconds: 5, UserSeconds: 4, MaxRSSKB: 100, CgroupCPUUserMs: 4000, MemoryPeakBytes: 1000, IOReadBytes: 10, IOWriteBytes: 20},
 		{Variant: "base", Phase: "measured", WallSeconds: 3, UserSeconds: 2, MaxRSSKB: 120},
 		{Variant: "base", Phase: "measured", WallSeconds: 4, UserSeconds: 3, MaxRSSKB: 110},
 		{Variant: "fast", Phase: "measured", WallSeconds: 2, UserSeconds: 1, MaxRSSKB: 90},
@@ -175,5 +231,8 @@ func TestSummarizeIgnoresWarmupsAndUsesMedian(t *testing.T) {
 	}
 	if byID["fast"].MedianWallSeconds != 2 || byID["fast"].SpeedupVsBaseline != 2 {
 		t.Fatalf("fast summary = %+v", byID["fast"])
+	}
+	if byID["base"].MeanCgroupCPUSeconds <= 0 || byID["base"].MeanMemoryPeakBytes <= 0 {
+		t.Fatalf("base cgroup summary = %+v", byID["base"])
 	}
 }

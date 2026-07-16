@@ -16,6 +16,7 @@ BENCH_TIER    = $(if $(strip $(TIER)),$(TIER),smoke)
 BENCH_CASE    = $(if $(strip $(CASE)),$(CASE),bcftools.pipeline-benchmark)
 BENCH_REPEATS = $(if $(strip $(REPEATS)),$(REPEATS),$(if $(filter medium,$(BENCH_TIER)),1,3))
 BENCH_WARMUPS = $(if $(strip $(WARMUPS)),$(WARMUPS),$(if $(filter medium,$(BENCH_TIER)),0,1))
+BENCH_CHECK_JOBS = $(if $(strip $(CHECK_JOBS)),$(CHECK_JOBS),0)
 
 ## ── 开发 ─────────────────────────────────────────────
 
@@ -40,16 +41,19 @@ guide-verify:
 
 guide-bench: build
 	go run ./guide/cmd/data --tier $(BENCH_TIER)
-	./bin/brun run -f --no-fs-diff --cwd $(CURDIR) \
-		-n guide-$(BENCH_CASE)-$(BENCH_TIER) -p brun -t guide,benchmark \
-		-- go run ./guide/cmd/bench --tier $(BENCH_TIER) --warmups $(BENCH_WARMUPS) --repeats $(BENCH_REPEATS) $(BENCH_CASE)
+	./bin/brun run -f --require-cgroup --no-fs-diff --cwd $(CURDIR) \
+		-n guide-$(BENCH_CASE)-$(BENCH_TIER) -p brun -t guide,benchmark,controller \
+		-- go run ./guide/cmd/bench --brun ./bin/brun --tier $(BENCH_TIER) \
+			--warmups $(BENCH_WARMUPS) --repeats $(BENCH_REPEATS) \
+			--check-jobs $(BENCH_CHECK_JOBS) $(BENCH_CASE)
 
 guide-bench-concat: build
 	go run ./guide/cmd/data --tier medium
-	./bin/brun run -f --no-fs-diff --cwd $(CURDIR) \
-		-n guide-bcftools-concat-medium -p brun -t guide,benchmark \
-		-- go run ./guide/cmd/bench --tier medium --warmups $(if $(strip $(WARMUPS)),$(WARMUPS),0) \
-			--repeats $(if $(strip $(REPEATS)),$(REPEATS),1) \
+	./bin/brun run -f --require-cgroup --no-fs-diff --cwd $(CURDIR) \
+		-n guide-bcftools-concat-medium -p brun -t guide,benchmark,controller \
+		-- go run ./guide/cmd/bench --brun ./bin/brun --tier medium \
+			--warmups $(if $(strip $(WARMUPS)),$(WARMUPS),0) \
+			--repeats $(if $(strip $(REPEATS)),$(REPEATS),1) --check-jobs $(BENCH_CHECK_JOBS) \
 			$(if $(strip $(THREADS)),--matrix threads=$(THREADS),) bcftools.concat-benchmark
 
 clean:

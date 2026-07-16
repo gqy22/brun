@@ -112,6 +112,11 @@ SQLite 当前定位为快速索引层，run 目录中的 `command.sh`、`stdout.
 
 已完成（schema v8）：运行状态采用严格的 `starting → running → 终态` 状态机。子进程启动后将 PID、PGID、启动时钟原子提交到数据库和 `process.json`；不再读取整数 `.pid`，也不接受数据库与文件身份不一致。`brun list`、`brun show`、Web 查询和 Web 周期检查共用 reconciler：`running` 缺少有效身份时立即失败，`starting` 超过 10 分钟仍未进入运行态则回收为失败；终态更新使用条件写入，避免停止、超时和自然退出互相覆盖。
 
+已完成：后台启动采用父子 pipe 握手。父进程只有收到子进程在 SQLite 创建 `starting` 记录后的
+`ready` 消息才显示 nohup 成功；资源委派、配置解析等早期错误会返回稳定错误码，并写入
+`diagnostics.jsonl`、`metadata.yaml` 和尽力创建的 `failed` 索引。握手超时或断管会终止后台
+进程组，不再留下“已经提示启动、实际没有可查询记录”的未知状态。
+
 已完成：hostname/username 采集状态已显式化。`brun run` 启动时尝试 `os.Hostname()` 和 `USER` 环境变量：成功写入 `hostname_status=ok`/`username_status=ok`，失败或为空时写入 `unavailable`。字段已并入 SQLite schema（version 6 迁移加 `hostname_status` / `username_status` 两列）、`metadata.yaml`、`brun show --json` / `brun list --json` 输出和 Web detail。`brun repair` 从 `metadata.yaml` 重建索引时也会带回这两个状态。
 
 已完成：展示层状态 `success_with_warnings` / `failed_with_warnings` / `cancelled_with_warnings` / `timed_out_with_warnings` 已落地。`Run.DisplayStatus()` 在终态存在 warning 时返回对应 `_with_warnings` 变体，其他情况原样返回 `Status`。`brun list/show --json`、Web `/api/runs` 列表与详情都透出 `display_status` 字段；Web 状态筛选和颜色覆盖四种终态。`status` 字段保持原值不变，agent 工具按 `status` 过滤不被打乱。

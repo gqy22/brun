@@ -98,7 +98,22 @@ func runCmd() *cobra.Command {
 }
 
 func executeRun(args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string, resourceMode resourcepkg.Mode) error {
+	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string, resourceMode resourcepkg.Mode) (retErr error) {
+	notifier := launchNotifierFromEnv()
+	launchReady := false
+	launchRunID := runIDFlag
+	launchRunDir := ""
+	launchCWD := cwdFlag
+	commandStr := strings.Join(args, " ")
+	defer func() {
+		if notifier == nil || launchReady || retErr == nil {
+			return
+		}
+		if launchRunID != "" && launchRunDir != "" {
+			recordDetachedLaunchFailure(launchRunID, launchRunDir, launchCWD, commandStr, name, project, resourceMode, retErr)
+		}
+		notifier.failed(launchRunID, retErr)
+	}()
 
 	// 后台模式: 忽略 SIGHUP，关闭终端后继续运行 (等效 nohup)
 	signal.Ignore(syscall.SIGHUP)
@@ -118,13 +133,16 @@ func executeRun(args []string, name, project, note string, tags []string,
 		cwd = detectCWD(args[0])
 		cwdSource = "inferred"
 	}
+	launchCWD = cwd
 
 	// 2. 生成 run_id + 创建 run_dir
 	runID := runIDFlag
 	if runID == "" {
 		runID = internal.GenerateRunID()
 	}
+	launchRunID = runID
 	runDir := internal.RunDir(runID)
+	launchRunDir = runDir
 	if err := internal.EnsureDir(runDir); err != nil {
 		return cliError("run_dir_create_failed", "创建 run 目录失败: "+err.Error(), "检查 BRUN_HOME、磁盘空间和目录权限", err)
 	}
@@ -172,8 +190,6 @@ func executeRun(args []string, name, project, note string, tags []string,
 	condaInfo := cmd.DetectCondaInfo()
 
 	// 5. 构建命令字符串
-	commandStr := strings.Join(args, " ")
-
 	// 6. 保存 command.sh + env.txt + 输入脚本快照
 	if err := cmd.SaveCommandFile(runDir, commandStr); err != nil {
 		diagnostics.Warning("command_file_write_failed", "command.sh 写入失败", err.Error())
@@ -273,6 +289,10 @@ func executeRun(args []string, name, project, note string, tags []string,
 			internal.Log().Warn("diagnostic_counter_increment_failed", "run_id", runID, "level", level, "error", err.Error())
 		}
 	})
+	if err := notifier.ready(runID, resourceDecision.Backend); err != nil {
+		return cliError("launch_notify_failed", "无法确认后台启动状态: "+err.Error(), "重新运行命令", err)
+	}
+	launchReady = true
 
 	// 8.5 预检查: 命令可执行文件是否存在。此时 run 记录已创建，启动失败也可查询。
 	if exePath, err := exec.LookPath(args[0]); err != nil {
@@ -656,18 +676,41 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
+	launchReader, launchWriter, err := os.Pipe()
+	if err != nil {
+		devNull.Close()
+		return fmt.Errorf("创建后台启动管道失败: %w", err)
+	}
+	defer launchReader.Close()
+	cmd.ExtraFiles = []*os.File{launchWriter}
+	cmd.Env = append(os.Environ(), launchFDEnv+"=3")
 
 	if err := cmd.Start(); err != nil {
+		launchWriter.Close()
 		devNull.Close()
 		return fmt.Errorf("启动后台进程失败: %w", err)
 	}
+	childPID := cmd.Process.Pid
+	launchWriter.Close()
 	devNull.Close()
+	message, launchErr := waitLaunch(launchReader, launchTimeout)
+	if launchErr != nil {
+		_ = syscall.Kill(-childPID, syscall.SIGKILL)
+		_ = cmd.Process.Release()
+		return cliError("launch_handshake_failed", launchErr.Error(), "检查 BRUN_HOME、systemd user manager 和诊断日志后重试", launchErr)
+	}
+	if message.Status == "failed" {
+		_ = cmd.Process.Release()
+		return cliError(message.Code, message.Message, message.Hint, nil)
+	}
+	_ = cmd.Process.Release()
 
-	fmt.Printf("[nohup] PID=%d, RunID=%s\n", cmd.Process.Pid, runID)
+	fmt.Printf("[nohup] PID=%d, RunID=%s\n", childPID, runID)
+	fmt.Printf("[nohup] resource: %s\n", message.Backend)
 	fmt.Printf("[nohup] stdout: %s\n", stdoutPath)
 	fmt.Printf("[nohup] stderr: %s\n", stderrPath)
 	fmt.Printf("[nohup] 使用 'brun list' 查看运行状态\n")
-	internal.Log().Info("run_detached", "run_id", runID, "pid", cmd.Process.Pid, "command", strings.Join(args, " "))
+	internal.Log().Info("run_detached", "run_id", runID, "pid", childPID, "command", strings.Join(args, " "))
 	return nil
 }
 

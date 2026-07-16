@@ -37,7 +37,7 @@ benchmark:
   variants:
     - id: standard
       matrix:
-        threads: ["1", "2", "4"]
+        threads: ["1", "2", "4", "8", "16"]
       command:
         - bcftools
         - concat

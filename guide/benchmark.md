@@ -10,14 +10,16 @@ make guide-bench CASE=bcftools.pipeline-benchmark TIER=smoke
 make guide-bench CASE=bcftools.pipeline-benchmark TIER=medium REPEATS=3 WARMUPS=1
 ```
 
-Make 入口会先构建本地 `bin/brun`，再用前台 `brun run` 包住 benchmark runner。这样长实验可通过
-`brun list/show/logs/stop` 监控和控制；runner 内部仍以 GNU `/usr/bin/time` 采集每个 variant，
-Brun 的进程采样不作为 variant 间性能比较的数据源。
+Make 入口会先构建本地 `bin/brun`，并用一个强制 cgroup 的 Brun run 监控整轮 benchmark；
+runner 的每一轮 variant 再通过 `brun run -f --require-cgroup` 执行。因此外层 run 负责整轮取消、
+setup 和正确性检查，内层 run 提供可精确定位、比较的单轮资源指标。runner 同时保留 GNU
+`/usr/bin/time`，作为独立于 cgroup 的 wall/user/system/RSS 证据。
 
-也可以直接调用：
+也可以直接调用 runner；这种方式仍会监控各计时轮次，但不会产生监控整轮流程的外层 run：
 
 ```bash
-go run ./guide/cmd/bench --tier smoke bcftools.pipeline-benchmark
+make build
+go run ./guide/cmd/bench --brun ./bin/brun --tier smoke bcftools.pipeline-benchmark
 ```
 
 runner 从 `guide/cases/` 按稳定 ID 查找案例，从 `guide/datasets/` 解析该 tier 的数据集。
@@ -83,12 +85,25 @@ benchmark:
 go run ./guide/cmd/bench --matrix threads=1,4,8 --tier medium <case-id>
 ```
 
+正确性检查默认并发数等于展开后的 variant 数量；例如 6 个测试方案会同时启动 6 个校验。
+大文件或共享存储环境可显式限制并发：
+
+```bash
+make guide-bench CASE=<case-id> TIER=medium CHECK_JOBS=2
+```
+
+检查并发只发生在所有计时轮次结束之后，不参与 wall time，也不会改变 variant 的平衡执行顺序。
+并发解码适合 CPU 或页缓存命中的场景；机械盘冷缓存或共享存储上应使用 `CHECK_JOBS=1` 或 `2`，
+避免多个顺序扫描互相争用。
+
 `balanced` 顺序按正式轮次循环移动 variant。例如 A/B/C 三轮依次执行 A-B-C、B-C-A、C-A-B；
 warmup 原始数据也写入 `runs.tsv`，但不参与汇总。
 
 ## 采集语义
 
-runner 使用 GNU `/usr/bin/time` 的 `%e/%U/%S/%M/%x`：
+runner 使用 GNU `/usr/bin/time` 的 `%e/%U/%S/%M/%x`，并在每轮结束后根据稳定 RunID
+从 Brun 数据库读取 cgroup v2 内核累计指标。无法取得 cgroup 时实验会在 payload 前失败，
+不允许混用 `/proc` 近似值。
 
 | 字段 | 含义 | 单位 |
 |---|---|---|
@@ -97,6 +112,11 @@ runner 使用 GNU `/usr/bin/time` 的 `%e/%U/%S/%M/%x`：
 | `system_seconds` | 内核态 CPU 时间 | 秒 |
 | `max_rss_kb` | 最大常驻内存 | KiB |
 | `exit_code` | 命令退出码 | 整数 |
+
+Brun 额外记录 `resource_backend`、CPU user/system、`memory_peak_bytes`、I/O read/write、
+OOM kill 和 PID 峰值。`runs.tsv` 同时保留 `brun_run_id`，任何异常值都可以回到
+`brun show <run-id> --json` 和原始日志审计。cgroup I/O 是实际块设备 I/O；写入仍停留在页缓存时
+可能为 0，不能将其解释为命令没有产生逻辑写入。
 
 `average_cores = (user_seconds + system_seconds) / wall_seconds`。汇总以 wall time 中位数计算相对
 baseline 的 speedup，同时保存平均值、范围、总体标准差和 CV。单轮 pilot 的标准差和 CV 为 0，
@@ -121,7 +141,7 @@ command: [bcftools, view, --no-version, -H, "{output}"]
 - `environment.tsv`：数据、版本和执行参数。
 - `state.tsv`：实验开始和结束时的负载、可用内存和 CPU 频率。
 - `commands.tsv`：展开后的准确命令。
-- `runs.tsv`：warmup 和 measured 的逐轮原始值。
+- `runs.tsv`：warmup 和 measured 的 GNU time、Brun RunID 与 cgroup 原始值。
 - `checks.tsv`：每个 variant 的正确性摘要。
 - `summary.tsv`：只基于 measured 数据的派生统计。
 - `report.md`：待人工审阅的报告草稿。
@@ -142,5 +162,5 @@ Git；人工审阅后的结论才进入 `guide/reports/`。
 
 ## 第一版边界
 
-当前不增加 DAG、集群执行、容器管理或 cgroup 依赖。setup 只允许一条命令，参数矩阵应控制
+当前不增加 DAG、集群执行或容器管理。性能轮次强制依赖可委派的 cgroup v2；setup 只允许一条命令，参数矩阵应控制
 组合数量；大规模矩阵必须由使用者显式请求，不能作为日常默认值。

@@ -31,7 +31,8 @@ evidence:
     - bcftools.concat-vs-merge
   benchmarks:
     - bcftools.concat-2026-07-15
-updated: "2026-07-15"
+    - bcftools.concat-threads-2026-07-16
+updated: "2026-07-16"
 ---
 
 ## 结论

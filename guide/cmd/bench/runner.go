@@ -16,8 +16,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/biotools/brun/internal"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,6 +30,8 @@ type runOptions struct {
 	DatasetRoot     string
 	CacheRoot       string
 	WorkingDir      string
+	BrunBin         string
+	CheckJobs       int
 	WarmupsOverride *int
 	RepeatsOverride *int
 	MatrixOverrides map[string][]string
@@ -92,6 +96,17 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	if _, err := exec.LookPath("/usr/bin/time"); err != nil {
 		return "", errors.New("需要 GNU /usr/bin/time")
 	}
+	brunBin := options.BrunBin
+	if brunBin == "" {
+		brunBin = "./bin/brun"
+	}
+	brunBin, err = filepath.Abs(brunBin)
+	if err != nil {
+		return "", err
+	}
+	if info, statErr := os.Stat(brunBin); statErr != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return "", fmt.Errorf("benchmark 需要可执行的 brun 二进制 %s；请先运行 make build", brunBin)
+	}
 
 	cacheRoot, err := filepath.Abs(options.CacheRoot)
 	if err != nil {
@@ -114,7 +129,6 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	if warmups < 0 || repeats <= 0 {
 		return "", errors.New("warmups 必须非负且 repeats 必须为正整数")
 	}
-
 	runID := fmt.Sprintf("%s-%d", time.Now().Format("20060102-150405"), os.Getpid())
 	resultDir = filepath.Join(cacheRoot, "benchmarks", item.ID, options.Tier, runID)
 	workDir := filepath.Join(cacheRoot, "work", item.ID+"-"+runID)
@@ -160,6 +174,10 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	if err != nil {
 		return resultDir, err
 	}
+	checkJobs, err := resolveCheckJobs(options.CheckJobs, len(variants))
+	if err != nil {
+		return resultDir, err
+	}
 	baselinePresent := false
 	for _, variant := range variants {
 		if variant.ID == item.Benchmark.Baseline {
@@ -189,9 +207,10 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	}
 
 	versions := collectVersions(ctx, workingDir, item.Benchmark.Versions)
+	versions["brun"] = collectVersion(ctx, workingDir, []string{brunBin, "--version"})
 	device := collectDeviceInfo(input, resultDir)
 	stateStart := collectRuntimeState()
-	if err := writeEnvironment(filepath.Join(resultDir, "environment.tsv"), item, dataset, input, inputInfo.Size(), warmups, repeats, versions, device); err != nil {
+	if err := writeEnvironment(filepath.Join(resultDir, "environment.tsv"), item, dataset, input, inputInfo.Size(), warmups, repeats, checkJobs, versions, device); err != nil {
 		return resultDir, err
 	}
 	statePath := filepath.Join(resultDir, "state.tsv")
@@ -241,7 +260,7 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 			return resultDir, err
 		}
 		fmt.Printf("[%s %d] %s\n", planned.Phase, planned.Repeat, planned.Variant.ID)
-		record, runErr := executeTimed(ctx, workingDir, workDir, planned, commands[planned.Variant.ID], output)
+		record, runErr := executeTimed(ctx, workingDir, workDir, brunBin, item.ID, options.Tier, planned, commands[planned.Variant.ID], output)
 		if record.Variant != "" {
 			runs = append(runs, record)
 		}
@@ -253,7 +272,7 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 		}
 	}
 
-	checks, err := runChecks(ctx, workingDir, item, variants, baseValues, outputs)
+	checks, err := runChecks(ctx, workingDir, item, variants, baseValues, outputs, checkJobs)
 	if writeErr := writeChecks(filepath.Join(resultDir, "checks.tsv"), checks); writeErr != nil {
 		return resultDir, writeErr
 	}
@@ -268,7 +287,7 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	if err := writeSummary(filepath.Join(resultDir, "summary.tsv"), summaries); err != nil {
 		return resultDir, err
 	}
-	if err := writeReport(filepath.Join(resultDir, "report.md"), item, dataset, warmups, repeats, summaries, device); err != nil {
+	if err := writeReport(filepath.Join(resultDir, "report.md"), item, dataset, warmups, repeats, checkJobs, summaries, device); err != nil {
 		return resultDir, err
 	}
 	if err := finalize("success"); err != nil {
@@ -276,6 +295,19 @@ func runBenchmark(ctx context.Context, options runOptions) (resultDir string, re
 	}
 	finalized = true
 	return resultDir, nil
+}
+
+func resolveCheckJobs(configured, variants int) (int, error) {
+	if configured < 0 {
+		return 0, errors.New("check-jobs 必须为非负整数")
+	}
+	if variants <= 0 {
+		return 0, errors.New("正确性检查缺少 variant")
+	}
+	if configured == 0 || configured > variants {
+		return variants, nil
+	}
+	return configured, nil
 }
 
 func findYAMLByID(root, wanted string) (string, error) {
@@ -329,17 +361,32 @@ func loadDatasetManifest(path string) (datasetManifest, error) {
 	return dataset, nil
 }
 
-func executeTimed(ctx context.Context, workingDir, workDir string, planned plannedRun, command []string, output string) (runRecord, error) {
+func executeTimed(ctx context.Context, workingDir, workDir, brunBin, caseID, tier string, planned plannedRun, command []string, output string) (runRecord, error) {
 	metricsPath := filepath.Join(workDir, fmt.Sprintf("time-%04d.tsv", planned.Order))
 	arguments := []string{"-q", "-o", metricsPath, "-f", "%e\t%U\t%S\t%M\t%x", "--"}
 	arguments = append(arguments, command...)
-	cmd := exec.CommandContext(ctx, "/usr/bin/time", arguments...)
+	brunRunID := internal.GenerateRunID()
+	brunArgs := []string{
+		"run", "--foreground", "--no-fs-diff", "--require-cgroup", "--run-id", brunRunID,
+		"--cwd", workingDir, "--name", fmt.Sprintf("bench-%s-%s-%s-%d", caseID, planned.Variant.ID, planned.Phase, planned.Repeat),
+		"--project", "brun", "--tag", "guide,benchmark," + tier + "," + caseID, "--", "/usr/bin/time",
+	}
+	brunArgs = append(brunArgs, arguments...)
+	cmd := exec.CommandContext(ctx, brunBin, brunArgs...)
 	configureManagedCommand(cmd)
 	cmd.Dir = workingDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	runErr := cmd.Run()
+	brunRun, brunErr := loadBrunRun(brunRunID)
+	if brunErr != nil {
+		return runRecord{}, fmt.Errorf("读取 brun run %s: %w", brunRunID, brunErr)
+	}
+	if brunRun.ResourceBackend != "cgroup_v2" || brunRun.ResourceStatus != "ok" {
+		return runRecord{}, fmt.Errorf("brun run %s 未获得 cgroup 精确指标: backend=%s status=%s fallback=%s",
+			brunRunID, brunRun.ResourceBackend, brunRun.ResourceStatus, brunRun.ResourceFallback)
+	}
 
 	data, err := os.ReadFile(metricsPath)
 	if err != nil {
@@ -374,16 +421,26 @@ func executeTimed(ctx context.Context, workingDir, workDir string, planned plann
 		outputBytes = info.Size()
 	}
 	record := runRecord{
-		Variant:       planned.Variant.ID,
-		Phase:         planned.Phase,
-		Repeat:        planned.Repeat,
-		Order:         planned.Order,
-		WallSeconds:   wall,
-		UserSeconds:   user,
-		SystemSeconds: system,
-		MaxRSSKB:      rss,
-		ExitCode:      exitCode,
-		OutputBytes:   outputBytes,
+		Variant:           planned.Variant.ID,
+		Phase:             planned.Phase,
+		Repeat:            planned.Repeat,
+		Order:             planned.Order,
+		WallSeconds:       wall,
+		UserSeconds:       user,
+		SystemSeconds:     system,
+		MaxRSSKB:          rss,
+		ExitCode:          exitCode,
+		OutputBytes:       outputBytes,
+		BrunRunID:         brunRunID,
+		ResourceBackend:   brunRun.ResourceBackend,
+		BrunDurationMs:    brunRun.DurationMs,
+		CgroupCPUUserMs:   brunRun.CPUUserMs,
+		CgroupCPUSystemMs: brunRun.CPUSystemMs,
+		MemoryPeakBytes:   brunRun.MemoryPeakBytes,
+		IOReadBytes:       brunRun.IOReadBytes,
+		IOWriteBytes:      brunRun.IOWriteBytes,
+		OOMKillCount:      brunRun.OOMKillCount,
+		PIDsPeak:          brunRun.PIDsPeak,
 	}
 	if runErr != nil {
 		return record, runErr
@@ -391,39 +448,81 @@ func executeTimed(ctx context.Context, workingDir, workDir string, planned plann
 	if exitCode != 0 {
 		return record, fmt.Errorf("退出码为 %d", exitCode)
 	}
+	if brunRun.Status != "success" || brunRun.ExitCode != 0 {
+		return record, fmt.Errorf("brun run %s 状态为 %s，退出码 %d", brunRunID, brunRun.Status, brunRun.ExitCode)
+	}
 	if outputBytes == 0 {
 		return record, errors.New("没有生成非空输出")
 	}
 	return record, nil
 }
 
-func runChecks(ctx context.Context, workingDir string, item benchmarkCase, variants []benchmarkVariant, baseValues map[string]string, outputs map[string]string) ([]checkRecord, error) {
+func loadBrunRun(runID string) (*internal.Run, error) {
+	store, err := internal.OpenStoreReadOnly(filepath.Join(internal.HomeDir(), "db.sqlite"))
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return store.GetRun(runID)
+}
+
+func runChecks(ctx context.Context, workingDir string, item benchmarkCase, variants []benchmarkVariant, baseValues map[string]string, outputs map[string]string, jobs int) ([]checkRecord, error) {
 	var records []checkRecord
 	for _, check := range item.Benchmark.Checks {
+		type checkResult struct {
+			value string
+			err   error
+		}
+		results := make([]checkResult, len(variants))
+		semaphore := make(chan struct{}, min(jobs, len(variants)))
+		var group sync.WaitGroup
+		for index, variant := range variants {
+			index, variant := index, variant
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				select {
+				case semaphore <- struct{}{}:
+					defer func() { <-semaphore }()
+				case <-ctx.Done():
+					results[index].err = ctx.Err()
+					return
+				}
+				values := cloneStrings(baseValues)
+				for key, value := range variant.Values {
+					values[key] = value
+				}
+				values["variant"] = variant.ID
+				values["output"] = outputs[variant.ID]
+				command, err := expandArguments(check.Command, values)
+				if err != nil {
+					results[index].err = err
+					return
+				}
+				digest := sha256.New()
+				cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+				configureManagedCommand(cmd)
+				cmd.Dir = workingDir
+				cmd.Stdout = digest
+				var stderr strings.Builder
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					results[index].value = strings.TrimSpace(stderr.String())
+					results[index].err = err
+					return
+				}
+				results[index].value = hex.EncodeToString(digest.Sum(nil))
+			}()
+		}
+		group.Wait()
 		valuesByVariant := make(map[string]string, len(variants))
-		for _, variant := range variants {
-			values := cloneStrings(baseValues)
-			for key, value := range variant.Values {
-				values[key] = value
+		for index, variant := range variants {
+			result := results[index]
+			if result.err != nil {
+				records = append(records, checkRecord{Variant: variant.ID, Check: check.ID, Status: "error", Value: result.value})
+				return records, fmt.Errorf("check %s/%s 执行失败: %w", check.ID, variant.ID, result.err)
 			}
-			values["variant"] = variant.ID
-			values["output"] = outputs[variant.ID]
-			command, err := expandArguments(check.Command, values)
-			if err != nil {
-				return records, fmt.Errorf("check %s: %w", check.ID, err)
-			}
-			digest := sha256.New()
-			cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-			configureManagedCommand(cmd)
-			cmd.Dir = workingDir
-			cmd.Stdout = digest
-			var stderr strings.Builder
-			cmd.Stderr = &stderr
-			if err := cmd.Run(); err != nil {
-				records = append(records, checkRecord{Variant: variant.ID, Check: check.ID, Status: "error", Value: strings.TrimSpace(stderr.String())})
-				return records, fmt.Errorf("check %s/%s 执行失败: %w", check.ID, variant.ID, err)
-			}
-			valuesByVariant[variant.ID] = hex.EncodeToString(digest.Sum(nil))
+			valuesByVariant[variant.ID] = result.value
 		}
 		expected := valuesByVariant[item.Benchmark.Baseline]
 		for _, variant := range variants {
@@ -470,7 +569,18 @@ func collectVersions(ctx context.Context, workingDir string, commands []versionC
 	return versions
 }
 
-func writeEnvironment(path string, item benchmarkCase, dataset datasetManifest, input string, inputBytes int64, warmups, repeats int, versions map[string]string, device deviceInfo) error {
+func collectVersion(ctx context.Context, workingDir string, command []string) string {
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	configureManagedCommand(cmd)
+	cmd.Dir = workingDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "unavailable"
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func writeEnvironment(path string, item benchmarkCase, dataset datasetManifest, input string, inputBytes int64, warmups, repeats, checkJobs int, versions map[string]string, device deviceInfo) error {
 	rows := [][]string{
 		{"field", "value"},
 		{"experiment_id", item.ID},
@@ -484,6 +594,7 @@ func writeEnvironment(path string, item benchmarkCase, dataset datasetManifest, 
 		{"contigs", strconv.Itoa(dataset.Metadata.Contigs)},
 		{"warmups", strconv.Itoa(warmups)},
 		{"repeats", strconv.Itoa(repeats)},
+		{"check_jobs", strconv.Itoa(checkJobs)},
 		{"order", item.Benchmark.Order},
 		{"cache_policy", item.Benchmark.CachePolicy},
 		{"system", runtime.GOOS + "/" + runtime.GOARCH},
@@ -553,12 +664,16 @@ func writeCommands(path string, setup []string, variants []benchmarkVariant, com
 }
 
 func writeRuns(path string, runs []runRecord) error {
-	rows := [][]string{{"variant", "phase", "repeat", "run_order", "wall_seconds", "user_seconds", "system_seconds", "max_rss_kb", "exit_code", "output_bytes"}}
+	rows := [][]string{{"variant", "phase", "repeat", "run_order", "brun_run_id", "resource_backend", "wall_seconds", "user_seconds", "system_seconds", "max_rss_kb", "brun_duration_ms", "cgroup_cpu_user_ms", "cgroup_cpu_system_ms", "memory_peak_bytes", "io_read_bytes", "io_write_bytes", "oom_kill_count", "pids_peak", "exit_code", "output_bytes"}}
 	for _, run := range runs {
 		rows = append(rows, []string{
-			run.Variant, run.Phase, strconv.Itoa(run.Repeat), strconv.Itoa(run.Order),
+			run.Variant, run.Phase, strconv.Itoa(run.Repeat), strconv.Itoa(run.Order), run.BrunRunID, run.ResourceBackend,
 			formatFloat(run.WallSeconds), formatFloat(run.UserSeconds), formatFloat(run.SystemSeconds),
-			strconv.FormatInt(run.MaxRSSKB, 10), strconv.Itoa(run.ExitCode), strconv.FormatInt(run.OutputBytes, 10),
+			strconv.FormatInt(run.MaxRSSKB, 10), strconv.FormatInt(run.BrunDurationMs, 10),
+			strconv.FormatInt(run.CgroupCPUUserMs, 10), strconv.FormatInt(run.CgroupCPUSystemMs, 10),
+			strconv.FormatInt(run.MemoryPeakBytes, 10), strconv.FormatInt(run.IOReadBytes, 10),
+			strconv.FormatInt(run.IOWriteBytes, 10), strconv.FormatInt(run.OOMKillCount, 10), strconv.FormatInt(run.PIDsPeak, 10),
+			strconv.Itoa(run.ExitCode), strconv.FormatInt(run.OutputBytes, 10),
 		})
 	}
 	return writeTSV(path, rows)
@@ -573,19 +688,20 @@ func writeChecks(path string, checks []checkRecord) error {
 }
 
 func writeSummary(path string, summaries []summaryRecord) error {
-	rows := [][]string{{"variant", "runs", "mean_wall_seconds", "median_wall_seconds", "min_wall_seconds", "max_wall_seconds", "stddev_wall_seconds", "cv_percent", "mean_cpu_seconds", "mean_max_rss_kb", "average_cores", "speedup_vs_baseline"}}
+	rows := [][]string{{"variant", "runs", "mean_wall_seconds", "median_wall_seconds", "min_wall_seconds", "max_wall_seconds", "stddev_wall_seconds", "cv_percent", "mean_cpu_seconds", "mean_max_rss_kb", "average_cores", "mean_cgroup_cpu_seconds", "mean_memory_peak_bytes", "mean_io_read_bytes", "mean_io_write_bytes", "cgroup_average_cores", "speedup_vs_baseline"}}
 	for _, item := range summaries {
 		rows = append(rows, []string{
 			item.Variant, strconv.Itoa(item.Runs), formatFloat(item.MeanWallSeconds), formatFloat(item.MedianWallSeconds),
 			formatFloat(item.MinWallSeconds), formatFloat(item.MaxWallSeconds), formatFloat(item.StddevWallSeconds),
 			formatFloat(item.CVPercent), formatFloat(item.MeanCPUSeconds), formatFloat(item.MeanMaxRSSKB),
-			formatFloat(item.AverageCores), formatFloat(item.SpeedupVsBaseline),
+			formatFloat(item.AverageCores), formatFloat(item.MeanCgroupCPUSeconds), formatFloat(item.MeanMemoryPeakBytes),
+			formatFloat(item.MeanIOReadBytes), formatFloat(item.MeanIOWriteBytes), formatFloat(item.CgroupAverageCores), formatFloat(item.SpeedupVsBaseline),
 		})
 	}
 	return writeTSV(path, rows)
 }
 
-func writeReport(path string, item benchmarkCase, dataset datasetManifest, warmups, repeats int, summaries []summaryRecord, device deviceInfo) error {
+func writeReport(path string, item benchmarkCase, dataset datasetManifest, warmups, repeats, checkJobs int, summaries []summaryRecord, device deviceInfo) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -593,15 +709,15 @@ func writeReport(path string, item benchmarkCase, dataset datasetManifest, warmu
 	defer file.Close()
 	fmt.Fprintf(file, "# Benchmark draft: %s\n\n", item.ID)
 	fmt.Fprintln(file, "本文件由统一 benchmark runner 自动生成，需人工审阅后才能作为正式经验结论。")
-	fmt.Fprintf(file, "\n- Dataset: `%s` (%s)\n- CPU: `%s`\n- Logical CPUs: %d\n- Memory: %s bytes\n- Input filesystem: `%s`\n- Output filesystem: `%s`\n- Cache policy: `%s`\n- Warmups: %d\n- Repeats: %d\n- Order: `%s`\n\n",
+	fmt.Fprintf(file, "\n- Dataset: `%s` (%s)\n- CPU: `%s`\n- Logical CPUs: %d\n- Memory: %s bytes\n- Input filesystem: `%s`\n- Output filesystem: `%s`\n- Cache policy: `%s`\n- Warmups: %d\n- Repeats: %d\n- Check jobs: %d\n- Order: `%s`\n\n",
 		dataset.ID, dataset.Tier, device.CPU.Model, device.CPU.LogicalCPUs, int64OrUnavailable(device.MemoryTotalBytes),
-		device.InputFilesystem.Type, device.OutputFilesystem.Type, item.Benchmark.CachePolicy, warmups, repeats, item.Benchmark.Order)
-	fmt.Fprintln(file, "| Variant | Median wall (s) | Mean CPU (s) | Mean max RSS (KiB) | Average cores | Speedup | CV |")
-	fmt.Fprintln(file, "|---|---:|---:|---:|---:|---:|---:|")
+		device.InputFilesystem.Type, device.OutputFilesystem.Type, item.Benchmark.CachePolicy, warmups, repeats, checkJobs, item.Benchmark.Order)
+	fmt.Fprintln(file, "| Variant | Median wall (s) | cgroup CPU (s) | Memory peak (bytes) | I/O read | I/O write | Average cores | Speedup | CV |")
+	fmt.Fprintln(file, "|---|---:|---:|---:|---:|---:|---:|---:|---:|")
 	for _, summary := range summaries {
-		fmt.Fprintf(file, "| %s | %.3f | %.3f | %.0f | %.3f | %.3f× | %.2f%% |\n",
-			summary.Variant, summary.MedianWallSeconds, summary.MeanCPUSeconds, summary.MeanMaxRSSKB,
-			summary.AverageCores, summary.SpeedupVsBaseline, summary.CVPercent)
+		fmt.Fprintf(file, "| %s | %.3f | %.3f | %.0f | %.0f | %.0f | %.3f | %.3f× | %.2f%% |\n",
+			summary.Variant, summary.MedianWallSeconds, summary.MeanCgroupCPUSeconds, summary.MeanMemoryPeakBytes,
+			summary.MeanIOReadBytes, summary.MeanIOWriteBytes, summary.CgroupAverageCores, summary.SpeedupVsBaseline, summary.CVPercent)
 	}
 	return file.Sync()
 }
