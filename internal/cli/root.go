@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +40,7 @@ func Execute(opts Options) error {
 			if len(args) == 0 {
 				return c.Help()
 			}
-			return detachRun(c, args, "", "", "", nil, false, "", 0, "", "auto")
+			return detachRun(c, args, "", "", "", nil, false, "", 0, "", resourcepkg.ModeAuto)
 		},
 	}
 	MustParse("root").Inject(rootCmd)

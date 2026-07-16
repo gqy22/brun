@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/biotools/brun/internal"
+	resourcepkg "github.com/biotools/brun/internal/resource"
 	"github.com/spf13/cobra"
 )
 
@@ -254,7 +255,7 @@ func TestExecuteRunWritesDiagnostics(t *testing.T) {
 	t.Setenv("BRUN_HOME", home)
 	cwd := fastTempDir(t)
 
-	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", "auto"); err != nil {
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", resourcepkg.ModeProc); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 
@@ -299,7 +300,7 @@ func TestExecuteRunFailsOnInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", "auto")
+	err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, "", resourcepkg.ModeProc)
 	if err == nil || !strings.Contains(err.Error(), "项目配置错误") {
 		t.Fatalf("executeRun() error = %v, want config error", err)
 	}
@@ -310,7 +311,7 @@ func TestExecuteRunRecordsMissingCommandAsFailed(t *testing.T) {
 	t.Setenv("BRUN_HOME", home)
 	cwd := fastTempDir(t)
 
-	if err := executeRun([]string{"nonexistent_command_abc123"}, "bad-cmd", "error-test", "", nil, true, "", 0, cwd, "", "auto"); err != nil {
+	if err := executeRun([]string{"nonexistent_command_abc123"}, "bad-cmd", "error-test", "", nil, true, "", 0, cwd, "", resourcepkg.ModeProc); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 
@@ -365,7 +366,7 @@ func TestExecuteRunUsesProvidedRunID(t *testing.T) {
 	cwd := fastTempDir(t)
 	runID := "20260605-091500-fixed1"
 
-	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, runID, "auto"); err != nil {
+	if err := executeRun([]string{"sh", "-c", "true"}, "", "", "", nil, true, "", 0, cwd, runID, resourcepkg.ModeProc); err != nil {
 		t.Fatalf("executeRun() error = %v", err)
 	}
 
@@ -627,7 +628,7 @@ func TestRerunWithSameTagsCopiesTags(t *testing.T) {
 	}
 	store.Close()
 
-	c := rerunCmd()
+	c := rerunCmdWithResourceMode(resourcepkg.ModeProc)
 	c.SetArgs([]string{"source", "--with-same-tags", "--name", "copied"})
 	if err := c.Execute(); err != nil {
 		t.Fatalf("rerun: %v", err)
@@ -661,6 +662,20 @@ func TestCommandArgumentContracts(t *testing.T) {
 				t.Fatal("unexpected positional argument was accepted")
 			}
 		})
+	}
+}
+
+func TestResourceBackendCLIIsOutcomeNotConfiguration(t *testing.T) {
+	for name, command := range map[string]*cobra.Command{
+		"run":   runCmd(),
+		"rerun": rerunCmd(),
+	} {
+		if command.Flags().Lookup("resource-backend") != nil {
+			t.Fatalf("%s still exposes --resource-backend", name)
+		}
+		if command.Flags().Lookup("require-cgroup") == nil {
+			t.Fatalf("%s is missing --require-cgroup", name)
+		}
 	}
 }
 

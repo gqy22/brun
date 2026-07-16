@@ -22,11 +22,39 @@ type Decision struct {
 	Requested string
 	Backend   string
 	Fallback  string
+	Detail    string
 	Env       Environment
 }
 
 func Decide(mode Mode) (Decision, error) {
-	return decide(mode, Detect(), ProcSupported())
+	return Resolve(mode, "")
+}
+
+// Resolve selects a resource backend and, on Linux, first tries to acquire a
+// delegated transient systemd user scope when cgroup v2 is available but the
+// current process has not already been delegated one.
+func Resolve(mode Mode, runID string) (Decision, error) {
+	return resolve(mode, runID, Detect(), ProcSupported(), AcquireDelegation)
+}
+
+func resolve(mode Mode, runID string, env Environment, procSupported bool, acquire func(string) (Environment, error)) (Decision, error) {
+	if mode != ModeProc && env.Unified && !env.Delegated && runID != "" {
+		delegated, err := acquire(runID)
+		if err == nil {
+			env = delegated
+		} else if mode == ModeCgroup {
+			return Decision{}, fmt.Errorf("cgroup backend unavailable: automatic systemd delegation failed: %w", err)
+		} else {
+			decision, decideErr := decide(mode, env, procSupported)
+			if decideErr != nil {
+				return Decision{}, decideErr
+			}
+			decision.Fallback = "systemd_scope_unavailable"
+			decision.Detail = err.Error()
+			return decision, nil
+		}
+	}
+	return decide(mode, env, procSupported)
 }
 
 func decide(mode Mode, env Environment, procSupported bool) (Decision, error) {

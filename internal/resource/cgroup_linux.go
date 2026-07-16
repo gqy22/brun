@@ -16,10 +16,14 @@ import (
 )
 
 type CgroupScope struct {
-	manager      *cgroup2.Manager
-	mountpoint   string
-	relativePath string
-	fullPath     string
+	manager        *cgroup2.Manager
+	mountpoint     string
+	relativePath   string
+	fullPath       string
+	delegatedRoot  string
+	supervisorPath string
+	ownsHierarchy  bool
+	controllers    []string
 }
 
 func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
@@ -29,9 +33,18 @@ func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
 	if !validRunID(runID) {
 		return nil, fmt.Errorf("invalid run id for cgroup path: %q", runID)
 	}
+	initialControl, err := os.ReadFile(filepath.Join(env.FullPath, "cgroup.subtree_control"))
+	if err != nil {
+		return nil, fmt.Errorf("read delegated controllers: %w", err)
+	}
 	supervisorPath := filepath.Join(env.FullPath, "supervisor")
-	if err := os.Mkdir(supervisorPath, 0o755); err != nil && !os.IsExist(err) {
-		return nil, fmt.Errorf("create supervisor cgroup: %w", err)
+	createdSupervisor := false
+	if err := os.Mkdir(supervisorPath, 0o755); err != nil {
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("create supervisor cgroup: %w", err)
+		}
+	} else {
+		createdSupervisor = true
 	}
 	if err := writeCgroupValue(filepath.Join(supervisorPath, "cgroup.procs"), strconv.Itoa(os.Getpid())); err != nil {
 		return nil, fmt.Errorf("move supervisor into cgroup: %w", err)
@@ -39,7 +52,8 @@ func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
 	if err := waitCgroupFileEmpty(filepath.Join(env.FullPath, "cgroup.procs"), 3*time.Second); err != nil {
 		return nil, fmt.Errorf("wait for delegated root to become empty: %w", err)
 	}
-	if err := enableControllers(env.FullPath, env.Controllers); err != nil {
+	enabledControllers, err := enableControllers(env.FullPath, env.Controllers)
+	if err != nil {
 		return nil, fmt.Errorf("enable delegated controllers: %w", err)
 	}
 
@@ -56,7 +70,12 @@ func NewCgroupScope(env Environment, runID string) (*CgroupScope, error) {
 		_ = manager.Delete()
 		return nil, err
 	}
-	return &CgroupScope{manager: manager, mountpoint: env.Mountpoint, relativePath: relative, fullPath: full}, nil
+	return &CgroupScope{
+		manager: manager, mountpoint: env.Mountpoint, relativePath: relative, fullPath: full,
+		delegatedRoot: env.FullPath, supervisorPath: supervisorPath,
+		ownsHierarchy: createdSupervisor && len(strings.Fields(string(initialControl))) == 0,
+		controllers:   enabledControllers,
+	}, nil
 }
 
 func waitCgroupFileEmpty(path string, timeout time.Duration) error {
@@ -139,8 +158,30 @@ func (s *CgroupScope) Populated() (bool, error) {
 	return false, fmt.Errorf("cgroup.events has no populated field")
 }
 
-func (s *CgroupScope) Kill() error  { return s.manager.Kill() }
-func (s *CgroupScope) Close() error { return s.manager.Delete() }
+func (s *CgroupScope) Kill() error { return s.manager.Kill() }
+
+func (s *CgroupScope) Close() error {
+	if s == nil || s.manager == nil {
+		return nil
+	}
+	if err := s.manager.Delete(); err != nil {
+		return err
+	}
+	// Scopes loaded by the reconciler do not own the supervisor hierarchy.
+	if s.delegatedRoot == "" || s.supervisorPath == "" || !s.ownsHierarchy {
+		return nil
+	}
+	if err := disableControllers(s.delegatedRoot, s.controllers); err != nil {
+		return fmt.Errorf("disable delegated controllers: %w", err)
+	}
+	if err := writeCgroupValue(filepath.Join(s.delegatedRoot, "cgroup.procs"), strconv.Itoa(os.Getpid())); err != nil {
+		return fmt.Errorf("restore supervisor to delegated root: %w", err)
+	}
+	if err := os.Remove(s.supervisorPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove supervisor cgroup: %w", err)
+	}
+	return nil
+}
 
 type CgroupTermination struct {
 	Empty     bool
@@ -219,17 +260,33 @@ func statsFromMetrics(metrics *cgroupstats.Metrics) Stats {
 	return result
 }
 
-func enableControllers(root string, available []string) error {
+func enableControllers(root string, available []string) ([]string, error) {
 	wanted := make([]string, 0, 4)
+	enabled := make([]string, 0, 4)
 	for _, controller := range []string{"cpu", "memory", "io", "pids"} {
 		if containsString(available, controller) {
 			wanted = append(wanted, "+"+controller)
+			enabled = append(enabled, controller)
 		}
 	}
 	if !containsString(available, "cpu") || !containsString(available, "memory") {
-		return fmt.Errorf("cpu and memory controllers are required; available=%v", available)
+		return nil, fmt.Errorf("cpu and memory controllers are required; available=%v", available)
 	}
-	return writeCgroupValue(filepath.Join(root, "cgroup.subtree_control"), strings.Join(wanted, " "))
+	if err := writeCgroupValue(filepath.Join(root, "cgroup.subtree_control"), strings.Join(wanted, " ")); err != nil {
+		return nil, err
+	}
+	return enabled, nil
+}
+
+func disableControllers(root string, controllers []string) error {
+	if len(controllers) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(controllers))
+	for _, controller := range controllers {
+		values = append(values, "-"+controller)
+	}
+	return writeCgroupValue(filepath.Join(root, "cgroup.subtree_control"), strings.Join(values, " "))
 }
 
 func writeCgroupValue(path, value string) error {

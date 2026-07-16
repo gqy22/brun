@@ -148,7 +148,15 @@ containerd/cgroups        管理每个 run 的 cgroup 和读取统计
 现有 /proc sampler        无委派、非 Linux 或创建失败时的兼容后端
 ```
 
-本机已验证以下入口可以获得普通用户可写的临时 cgroup，无需让 brun 以 root 运行：
+默认 `auto` 会通过 systemd user D-Bus 自动创建带 `Delegate=yes` 的 transient scope，
+把 brun 自身移入 scope 后再建立 supervisor/payload 两级 cgroup。因此在常见的 systemd
+用户会话中无需手写 `systemd-run`：
+
+```bash
+brun run -- <command>
+```
+
+以下显式入口仍可用于没有 user D-Bus、但允许调用 `systemd-run` 的环境：
 
 ```bash
 systemd-run --user --scope --same-dir --property=Delegate=yes -- brun run -- <command>
@@ -156,11 +164,15 @@ systemd-run --user --scope --same-dir --property=Delegate=yes -- brun run -- <co
 
 schema v9 增加 `resource_backend`、cgroup 路径、CPU user/system、`memory_peak_bytes`、I/O、OOM 和
 进程峰值。`peak_rss_kb` 继续只表示 `/proc` 采样 RSS，避免与 cgroup charged memory 混淆。
-`--resource-backend auto` 在无委派时降级到 `/proc` 并记录原因；`cgroup` 强制模式不可用时拒绝执行 payload。
+默认运行会依次尝试已有委派和自动 systemd scope，均不可用时才降级到 `/proc`，并记录
+`systemd_scope_unavailable` 及具体错误。CLI 不再暴露底层 backend 选择；正式 benchmark
+可以使用 `--require-cgroup`，自动委派不可用时会在执行 payload 前失败，避免不同轮次使用
+不同的统计口径。
 
 ### 验收标准
 
 - [x] 普通用户通过 systemd 委派运行，不要求 root、sudo 或全局 cgroup 写权限。
+- [x] 默认运行可通过 systemd user manager 自动获取临时委派，无需包装 `systemd-run`。
 - [x] 被测命令及其所有后代在执行有效载荷前进入同一个 run cgroup。
 - [x] CPU 时间和峰值内存由内核累计统计，短生命周期子进程不会因轮询间隔丢失。
 - [x] cgroup 不可用时无行为中断地降级到现有 `/proc` sampler，并显式记录采集后端或状态。

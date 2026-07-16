@@ -219,9 +219,14 @@ func stopCmd() *cobra.Command {
 // --- rerun ---
 
 func rerunCmd() *cobra.Command {
+	return rerunCmdWithResourceMode(resourcepkg.ModeAuto)
+}
+
+func rerunCmdWithResourceMode(defaultResourceMode resourcepkg.Mode) *cobra.Command {
 	var newCWD string
 	var dryRun, sameTags, latest bool
 	var rerunName string
+	var requireCgroup bool
 
 	ht := MustParse("rerun")
 	c := &cobra.Command{
@@ -253,14 +258,19 @@ func rerunCmd() *cobra.Command {
 					return err
 				}
 			}
+			resourceMode := defaultResourceMode
+			if requireCgroup {
+				resourceMode = resourcepkg.ModeCgroup
+			}
 			return executeRun(cmd.ShellCommandArgs(cmdStr), name, r.Project, "", tags,
-				false, "", 0, execCWD, "", "auto")
+				false, "", 0, execCWD, "", resourceMode)
 		},
 	}
 	c.Flags().StringVar(&newCWD, "cwd", "", "使用新运行目录")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "只打印不执行")
 	c.Flags().BoolVar(&sameTags, "with-same-tags", false, "继承原 tags")
 	c.Flags().StringVarP(&rerunName, "name", "n", "", "指定新 run 名称")
+	c.Flags().BoolVar(&requireCgroup, "require-cgroup", false, "必须使用 cgroup v2；不可用时不执行命令")
 	c.Flags().BoolVar(&latest, "latest", false, "重新运行最新记录")
 	ht.Inject(c)
 	return c

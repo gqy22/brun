@@ -64,21 +64,21 @@ func runCmd() *cobra.Command {
 	var cwdFlag string
 	var foreground bool
 	var runIDFlag string
-	var resourceBackend string
+	var requireCgroup bool
 
 	c := &cobra.Command{
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			resourceMode, err := resourcepkg.ParseMode(resourceBackend)
-			if err != nil {
-				return cliError("invalid_resource_backend", err.Error(), "使用 auto、proc 或 cgroup", err)
+			resourceMode := resourcepkg.ModeAuto
+			if requireCgroup {
+				resourceMode = resourcepkg.ModeCgroup
 			}
 			if foreground {
 				return executeRun(args, name, project, note, tags,
-					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag, runIDFlag, string(resourceMode))
+					noFsDiff, allowExit, time.Duration(timeout)*time.Second, cwdFlag, runIDFlag, resourceMode)
 			}
 			return detachRun(c, args, name, project, note, tags,
-				noFsDiff, allowExit, timeout, cwdFlag, string(resourceMode))
+				noFsDiff, allowExit, timeout, cwdFlag, resourceMode)
 		},
 	}
 	c.Flags().StringVarP(&name, "name", "n", "", "run 名称")
@@ -91,14 +91,14 @@ func runCmd() *cobra.Command {
 	c.Flags().StringVar(&cwdFlag, "cwd", "", "运行目录；不传时从脚本路径或当前目录推断")
 	c.Flags().BoolVarP(&foreground, "foreground", "f", false, "前台运行 (默认 nohup 后台)")
 	c.Flags().StringVar(&runIDFlag, "run-id", "", "内部使用: 指定 run ID")
-	c.Flags().StringVar(&resourceBackend, "resource-backend", "auto", "资源后端: auto、proc 或 cgroup")
+	c.Flags().BoolVar(&requireCgroup, "require-cgroup", false, "必须使用 cgroup v2；不可用时不执行命令")
 	c.Flags().MarkHidden("run-id")
 	ht.Inject(c)
 	return c
 }
 
 func executeRun(args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string, resourceMode string) error {
+	noFsDiff bool, allowExit string, timeout time.Duration, cwdFlag string, runIDFlag string, resourceMode resourcepkg.Mode) error {
 
 	// 后台模式: 忽略 SIGHUP，关闭终端后继续运行 (等效 nohup)
 	signal.Ignore(syscall.SIGHUP)
@@ -132,18 +132,18 @@ func executeRun(args []string, name, project, note string, tags []string,
 	if cwdSource == "inferred" {
 		diagnostics.Info("cwd_inferred", "已推断运行目录", cwd)
 	}
-	mode, err := resourcepkg.ParseMode(resourceMode)
-	if err != nil {
-		return cliError("invalid_resource_backend", err.Error(), "使用 auto、proc 或 cgroup", err)
-	}
-	resourceDecision, err := resourcepkg.Decide(mode)
+	resourceDecision, err := resourcepkg.Resolve(resourceMode, runID)
 	if err != nil {
 		return cliError("resource_backend_unavailable", err.Error(),
-			"使用 systemd-run --user --scope --property=Delegate=yes 获取委派，或改用 --resource-backend proc", err)
+			"确认 systemd user manager 可用，或移除 --require-cgroup 以允许自动降级", err)
 	}
 	if resourceDecision.Fallback != "" {
+		detail := fmt.Sprintf("requested=%s backend=%s reason=%s", resourceDecision.Requested, resourceDecision.Backend, resourceDecision.Fallback)
+		if resourceDecision.Detail != "" {
+			detail += " detail=" + resourceDecision.Detail
+		}
 		diagnostics.Warning("resource_backend_fallback", "资源后端已降级",
-			fmt.Sprintf("requested=%s backend=%s reason=%s", resourceDecision.Requested, resourceDecision.Backend, resourceDecision.Fallback))
+			detail)
 	}
 
 	// 3. 识别 project + 读 brun.yaml
@@ -592,7 +592,7 @@ func syncRunDiagnostics(store *internal.Store, runID, runDir string) {
 
 // detachRun 将命令以后台 nohup 方式执行，等效于 nohup cmd > out.o 2> out.er &
 func detachRun(c *cobra.Command, args []string, name, project, note string, tags []string,
-	noFsDiff bool, allowExit string, timeout int, cwdFlag string, resourceMode string) error {
+	noFsDiff bool, allowExit string, timeout int, cwdFlag string, resourceMode resourcepkg.Mode) error {
 
 	// 生成 run ID，父进程和子进程共享，确保提示、日志路径和数据库记录一致。
 	runID := internal.GenerateRunID()
@@ -624,7 +624,9 @@ func detachRun(c *cobra.Command, args []string, name, project, note string, tags
 	if cwdFlag != "" {
 		childArgs = append(childArgs, "--cwd", cwdFlag)
 	}
-	childArgs = append(childArgs, "--resource-backend", resourceMode)
+	if resourceMode == resourcepkg.ModeCgroup {
+		childArgs = append(childArgs, "--require-cgroup")
+	}
 	childArgs = append(childArgs, "--")
 	childArgs = append(childArgs, args...)
 
